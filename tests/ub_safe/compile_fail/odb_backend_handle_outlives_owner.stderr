@@ -1,0 +1,11 @@
+error[E0597]: `backend` does not live long enough
+ --> tests/ub_safe/compile_fail/odb_backend_handle_outlives_owner.rs:7:9
+  |
+5 |     let handle: OdbBackendRef<'_> = {
+  |         ------ borrow later stored here
+6 |         let backend = OdbBackend::new();
+  |             ------- binding `backend` declared here
+7 |         backend.as_ref()
+  |         ^^^^^^^ borrowed value does not live long enough
+8 |     };
+  |     - `backend` dropped here while still borrowed

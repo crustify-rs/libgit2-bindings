@@ -1,0 +1,9 @@
+error[E0502]: cannot borrow `backend` as mutable because it is also borrowed as immutable
+ --> tests/ub_safe/compile_fail/odb_backend_aliased_handles.rs:8:5
+  |
+7 |     let shared = backend.as_ref();
+  |                  ------- immutable borrow occurs here
+8 |     backend.as_mut().refresh().unwrap();
+  |     ^^^^^^^^^^^^^^^^ mutable borrow occurs here
+9 |     let _ = shared.version();
+  |             ------ immutable borrow later used here

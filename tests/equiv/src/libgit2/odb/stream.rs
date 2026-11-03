@@ -182,7 +182,7 @@ fn c_fields(s: *mut ffi::git_odb_stream) -> Fields {
 /// The fields of the Rust stream, through its getters.
 fn rust_fields(s: OdbStreamRef<'_, '_>) -> Fields {
     Fields {
-        backend_set: !s.backend().is_null(),
+        backend_set: s.backend().is_some(),
         mode: s.mode(),
         hash_ctx: s.has_hash_ctx(),
         oid_type: s.oid_type().map_or_else(UnnamedOidType::raw, OidType::raw),

@@ -2206,3 +2206,56 @@ pub(crate) mod odb_stream {
         unsafe { OdbWritepackBox::from_c(out) }.ok_or(ffi::GIT_PASSTHROUGH)
     }
 }
+
+pub(crate) mod odb_backend {
+    use std::ffi::{CStr, c_char, c_int, c_void};
+
+    use libgit2::ffi;
+    use libgit2::libgit2::src::libgit2::odb::OdbBackendBox;
+
+    // The constructors the stand-ins call; their options are NULL, which both accept.
+    unsafe extern "C" {
+        fn git_odb_backend_pack(
+            out: *mut *mut ffi::git_odb_backend,
+            objects_dir: *const c_char,
+            opts: *const c_void,
+        ) -> c_int;
+        fn git_odb_backend_loose(
+            out: *mut *mut ffi::git_odb_backend,
+            objects_dir: *const c_char,
+            opts: *mut c_void,
+        ) -> c_int;
+    }
+
+    /// libgit2's packed backend over `objects_dir` (`git_odb_backend_pack`), adopted;
+    /// the error code when it cannot be built.
+    ///
+    /// With [`loose`], the one unsafe adoption of `OdbBackendBox`, until the safe
+    /// constructors land.
+    pub(crate) fn pack(objects_dir: &CStr) -> Result<OdbBackendBox, i32> {
+        let mut out = core::ptr::null_mut();
+        // SAFETY: `out` is a writable slot and `objects_dir` live for the call.
+        let rc =
+            unsafe { git_odb_backend_pack(&raw mut out, objects_dir.as_ptr(), core::ptr::null()) };
+        if rc < 0 {
+            return Err(rc);
+        }
+        // SAFETY: success built a complete backend with its `free` member set, which no
+        // odb and nothing else holds.
+        Ok(unsafe { OdbBackendBox::from_c(out) }.unwrap())
+    }
+
+    /// libgit2's loose backend over `objects_dir` (`git_odb_backend_loose`), adopted.
+    pub(crate) fn loose(objects_dir: &CStr) -> Result<OdbBackendBox, i32> {
+        let mut out = core::ptr::null_mut();
+        // SAFETY: as in `pack`.
+        let rc = unsafe {
+            git_odb_backend_loose(&raw mut out, objects_dir.as_ptr(), core::ptr::null_mut())
+        };
+        if rc < 0 {
+            return Err(rc);
+        }
+        // SAFETY: as in `pack`.
+        Ok(unsafe { OdbBackendBox::from_c(out) }.unwrap())
+    }
+}

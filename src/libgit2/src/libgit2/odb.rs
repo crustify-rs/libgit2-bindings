@@ -1882,6 +1882,9 @@ pub struct ForeachCallback<'f> {
     f: &'f mut ForeachFn<'f>,
     /// A panic the closure raised inside a C walk, resumed once the walk returns.
     panic: Option<Box<dyn Any + Send + 'static>>,
+    /// The code the closure stopped the current walk with, which tells its break from a
+    /// failure of the walk that returns a code of the same value.
+    stopped: Option<NonZero<c_int>>,
 }
 
 impl<'f> ForeachCallback<'f> {
@@ -1890,7 +1893,11 @@ impl<'f> ForeachCallback<'f> {
     where
         F: FnMut(OidRef<'_>) -> ControlFlow<NonZero<c_int>> + 'f,
     {
-        Self { f, panic: None }
+        Self {
+            f,
+            panic: None,
+            stopped: None,
+        }
     }
 
     /// Calls the callback with `id`, through the trampoline libgit2 calls, and returns
@@ -1921,6 +1928,7 @@ impl<'f> ForeachCallback<'f> {
         &mut self,
         walk: impl FnOnce(ffi::git_odb_foreach_cb, *mut c_void) -> R,
     ) -> R {
+        self.stopped = None;
         let result = walk(Some(foreach_with), ptr::from_mut(self).cast());
         if let Some(panic) = self.panic.take() {
             panic::resume_unwind(panic);
@@ -1958,7 +1966,10 @@ unsafe extern "C" fn foreach_with(id: *const ffi::git_oid, payload: *mut c_void)
     };
     match panic::catch_unwind(AssertUnwindSafe(|| (callback.f)(id))) {
         Ok(ControlFlow::Continue(())) => 0,
-        Ok(ControlFlow::Break(code)) => code.get(),
+        Ok(ControlFlow::Break(code)) => {
+            callback.stopped = Some(code);
+            code.get()
+        }
         Err(panic) => {
             callback.panic = Some(panic);
             ErrorCode::User.raw()
@@ -2622,24 +2633,28 @@ impl<'o> OdbStreamMut<'_, 'o> {
     }
 }
 
-impl OdbStreamRef<'_, '_> {
+impl<'a> OdbStreamRef<'a, '_> {
     /// The backend that made the stream, which libgit2 hands back to the backend's own
-    /// members; NULL only for a stream no backend set up.
+    /// members; `None` only for a stream no backend set up.
     ///
-    /// A raw pointer until `git_odb_backend` is wrapped: the backend belongs to the odb
-    /// the stream borrows for `'o`, and is reached only through it. Nothing here
-    /// dereferences it.
+    /// A shared handle, for the stream's borrow: the backend belongs to the odb the
+    /// stream borrows for `'o`, which frees its backends only with itself, and the
+    /// fields the handle reads are fixed once the odb holds the backend.
     ///
     /// Wraps `fld::git_odb_stream.backend`
     #[doc(alias = "git_odb_stream.backend")]
     #[must_use]
-    pub fn backend(&self) -> *mut ffi::git_odb_backend {
+    pub fn backend(&self) -> Option<OdbBackendRef<'a>> {
         // SAFETY: `self.as_ptr()` addresses the live stream this handle borrows; the
         // projection forms no reference to it.
         let backend_ptr = unsafe { &raw const (*self.as_ptr()).backend };
         // SAFETY: a read through the shared handle's pointer to a live stream; any
         // value is a valid raw pointer.
-        unsafe { backend_ptr.read() }
+        let backend = unsafe { backend_ptr.read() };
+        // SAFETY: a non-NULL `backend` is the backend that made the stream (the owner's
+        // adoption vouches for that), which the odb borrowed for `'o` keeps alive past
+        // `'a`; the handle only reads it, as the odb's own readers do.
+        unsafe { OdbBackendRef::from_ptr(backend) }
     }
 
     /// The stream's mode, as its backend set it: the bits of `git_odb_stream_t`,
@@ -3124,24 +3139,26 @@ impl<'o> OdbWritepackMut<'_, 'o> {
     }
 }
 
-impl OdbWritepackRef<'_, '_> {
+impl<'a> OdbWritepackRef<'a, '_> {
     /// The backend that made the writepack, which libgit2 hands back to the backend's
-    /// own members; NULL only for a writepack no backend set up.
+    /// own members; `None` only for a writepack no backend set up.
     ///
-    /// A raw pointer until `git_odb_backend` is wrapped: the backend belongs to the odb
-    /// the writepack borrows for `'o`, and is reached only through it. Nothing here
-    /// dereferences it.
+    /// A shared handle, for the writepack's borrow: the backend belongs to the odb the
+    /// writepack borrows for `'o`, as [`OdbStreamRef::backend`]'s does.
     ///
     /// Wraps `fld::git_odb_writepack.backend`
     #[doc(alias = "git_odb_writepack.backend")]
     #[must_use]
-    pub fn backend(&self) -> *mut ffi::git_odb_backend {
+    pub fn backend(&self) -> Option<OdbBackendRef<'a>> {
         // SAFETY: `self.as_ptr()` addresses the live writepack this handle borrows; the
         // projection forms no reference to it.
         let backend_ptr = unsafe { &raw const (*self.as_ptr()).backend };
         // SAFETY: a read through the shared handle's pointer to a live writepack; any
         // value is a valid raw pointer.
-        unsafe { backend_ptr.read() }
+        let backend = unsafe { backend_ptr.read() };
+        // SAFETY: as in `OdbStreamRef::backend`: the backend that made the writepack,
+        // kept alive by the odb borrowed for `'o`, only read.
+        unsafe { OdbBackendRef::from_ptr(backend) }
     }
 }
 
@@ -3244,6 +3261,496 @@ fn member_result(rc: c_int) -> Result<(), StreamError> {
         Err(StreamError::from_libgit2(rc))
     } else {
         Ok(())
+    }
+}
+
+// --- `git2/sys/odb_backend.h`: `git_odb_backend` ---------------------------------------
+
+define_ctype!(
+    /// An object database backend (`git_odb_backend`): the table of members through which
+    /// an odb reads, writes and walks the objects one store holds (loose files,
+    /// packfiles, or a custom store). The layout type named by [`OdbBackendBox`] and the
+    /// handles; held by value only as the inert template [`new`](Self::new) builds.
+    ///
+    /// A backend is the first member of a container of its own (libgit2's
+    /// `loose_backend` and `pack_backend`, or a custom one), whose members cast the
+    /// backend back to that container. The members therefore belong to the whole
+    /// allocation: none can be replaced, and the backend is never copied, so there are
+    /// no setters.
+    ///
+    /// # Reaching the members
+    ///
+    /// Every member is optional but `free`, and each has a presence getter on
+    /// [`OdbBackendRef`] (`has_<member>`). The members that take no object id are called
+    /// through [`OdbBackendMut`]: [`refresh`](OdbBackendMut::refresh),
+    /// [`foreach`](OdbBackendMut::foreach) and
+    /// [`write_multi_pack_index`](OdbBackendMut::write_multi_pack_index). The others are
+    /// reached through the odb the backend is added to, never directly:
+    ///
+    /// - the members that look an object up by id or write one (`read`, `read_prefix`,
+    ///   `read_header`, `exists`, `exists_prefix`, `freshen`, `write`, `readstream`) take an id of
+    ///   the backend's own type, which the struct does not record: libgit2's loose backend formats
+    ///   any id into a path sized for its own type, so a SHA-256 id given to a SHA-1 backend
+    ///   writes past that buffer. The odb's wrappers ([`OdbRef::read`] and the rest) check the id
+    ///   against the odb's type first;
+    /// - `writestream` returns a stream without the hashing context that `git_odb_open_wstream`
+    ///   gives it, and whose finalisation reads the backend's odb: [`OdbRef::open_write_stream`]
+    ///   opens one complete;
+    /// - `writepack` indexes into an odb it is given, which a backend alone does not have.
+    ///
+    /// `free` releases the backend: [`OdbBackendFree`], through an [`OdbBackendBox`].
+    ///
+    /// # Threads
+    ///
+    /// Neither the layout type nor the handles are `Send` or `Sync`: a backend is a
+    /// custom store's as much as libgit2's, and nothing in the table says whether its
+    /// members may run on another thread, or on two at once.
+    ///
+    /// ```compile_fail,E0277
+    /// use libgit2::libgit2::src::libgit2::odb::OdbBackendBox;
+    ///
+    /// fn send<T: Send>(_: T) {}
+    /// fn forward(backend: OdbBackendBox) {
+    ///     send(backend);
+    /// }
+    /// ```
+    ///
+    /// Wraps `ty::git_odb_backend`
+    #[doc(alias = "git_odb_backend")]
+    OdbBackend,
+    OdbBackendRef,
+    OdbBackendMut,
+    ffi::git_odb_backend
+);
+
+impl OdbBackend {
+    /// The inert template a custom backend starts from, as `git_odb_init_backend` (and
+    /// `GIT_ODB_BACKEND_INIT`) fills it: [`version`](OdbBackendRef::version)
+    /// `GIT_ODB_BACKEND_VERSION`, no odb and no members.
+    ///
+    /// It owns nothing, and is no backend: with no `free` member it is never adopted as
+    /// an [`OdbBackendBox`], and each member the handles call through it fails as unset
+    /// (but `refresh`, which has nothing to rescan).
+    ///
+    /// ```
+    /// use libgit2::libgit2::src::libgit2::odb::OdbBackend;
+    ///
+    /// # if cfg!(miri) { return; } // Miri cannot call libgit2.
+    /// let backend = OdbBackend::new();
+    /// assert_eq!(backend.as_ref().version(), 1);
+    /// assert!(!backend.as_ref().has_read() && !backend.as_ref().has_free());
+    /// ```
+    ///
+    /// Wraps `fn::git_odb_init_backend`
+    ///
+    /// # Panics
+    ///
+    /// Panics only if libgit2 refuses the version it defines itself, which it never
+    /// does.
+    #[doc(alias = "git_odb_init_backend")]
+    #[must_use]
+    pub fn new() -> Self {
+        let mut raw = MaybeUninit::<ffi::git_odb_backend>::uninit();
+        // SAFETY: `raw` is writable storage for one backend, exclusively this call's; the
+        // routine zeroes all of it and sets its version, retaining no pointer.
+        let rc =
+            unsafe { ffi::git_odb_init_backend(raw.as_mut_ptr(), ffi::GIT_ODB_BACKEND_VERSION) };
+        assert_eq!(rc, 0, "git_odb_init_backend refused its own version");
+        // SAFETY: success wrote every byte: zeroes (NULL members and odb, which the
+        // getters read as absent) and the version.
+        Self(unsafe { raw.assume_init() }, PhantomData)
+    }
+}
+
+impl Default for OdbBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Releases a backend through its own `free` member, which releases the container the
+/// backend is the first member of (libgit2's frees its packs, its paths and the
+/// allocation). Stateless: the routine is recovered from the object.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct OdbBackendFree;
+
+// SAFETY: every owner holds a complete backend with the members its implementation set
+// (`OdbBackendBox::from_c`'s caller vouches for that), which no odb holds; its `free`
+// member releases exactly that allocation, once, and nothing else. A backend without
+// one cannot be released, and is left alone, where libgit2 would call through NULL.
+unsafe impl CDrop<OdbBackend> for OdbBackendFree {
+    /// Wraps `fld::git_odb_backend.free`
+    #[doc(alias = "git_odb_backend.free")]
+    unsafe fn c_drop(&self, ptr: NonNull<OdbBackend>) {
+        let backend = ptr.as_ptr().cast::<ffi::git_odb_backend>();
+        // SAFETY: per `c_drop`'s contract `backend` addresses a live backend the caller
+        // gives up; the projection forms no reference to it.
+        let free_ptr = unsafe { &raw const (*backend).free };
+        // SAFETY: a read of the live backend's member: an optional function pointer.
+        if let Some(free) = unsafe { free_ptr.read() } {
+            // SAFETY: `free` is the member the backend's implementation set for this
+            // very allocation, which the caller gives up and no odb holds.
+            unsafe { free(backend) }
+        }
+    }
+}
+
+/// The sole owner of a backend no odb holds, released through [`OdbBackendFree`].
+///
+/// libgit2's constructors (`git_odb_backend_loose`, `git_odb_backend_pack`,
+/// `git_odb_backend_one_pack`) and a custom store's build one; adding it to an odb
+/// (`git_odb_add_backend`) hands it over. Until those are wrapped, an owner is adopted
+/// with `from_c`, whose caller vouches that the pointer is such a backend, complete,
+/// with its `free` member set, and held by nothing else. It is not `Clone`: libgit2
+/// copies no backend.
+pub type OdbBackendBox = CBox<OdbBackend, OdbBackendFree>;
+
+const _: () = assert!(size_of::<OdbBackend>() == size_of::<ffi::git_odb_backend>());
+
+const _: () = assert!(size_of::<OdbBackendBox>() == size_of::<*mut ffi::git_odb_backend>());
+
+/// The failure of a call on a member the backend did not set: `GIT_ERROR` with a
+/// `GIT_ERROR_ODB` error naming the member, where libgit2 would call through NULL (or,
+/// over the odb, skip the backend).
+fn unset_member(name: &str) -> OdbError {
+    let message = format!("odb backend does not implement '{name}'");
+    set(
+        ErrorClass::Odb,
+        &std::ffi::CString::new(message).expect("member names contain no NUL"),
+    );
+    OdbError::from_libgit2(ErrorCode::Generic.raw())
+}
+
+/// A `refresh` or `writemidx` member's return as the odb reads it: negative is an
+/// error, described by the thread's last libgit2 error; anything else is success.
+fn member_status(rc: c_int) -> Result<(), OdbError> {
+    if rc < 0 {
+        Err(OdbError::from_libgit2(rc))
+    } else {
+        Ok(())
+    }
+}
+
+/// Reads one optional function-pointer member of the live backend `$backend` addresses,
+/// a pointer a handle lends.
+macro_rules! member {
+    ($backend:expr, $name:ident) => {{
+        let backend: *const ffi::git_odb_backend = $backend;
+        // SAFETY: `backend` addresses the live backend a handle borrows; the projection
+        // forms no reference to it.
+        let member_ptr = unsafe { &raw const (*backend).$name };
+        // SAFETY: a read through the handle's pointer to a live backend: an optional
+        // function pointer, which its implementation leaves NULL or sets.
+        unsafe { member_ptr.read() }
+    }};
+}
+
+impl OdbBackendRef<'_> {
+    /// The version of the backend interface the backend implements:
+    /// `GIT_ODB_BACKEND_VERSION` (1) for every backend libgit2 builds, and the one
+    /// `git_odb_add_backend` requires.
+    ///
+    /// Wraps `fld::git_odb_backend.version`
+    #[doc(alias = "git_odb_backend.version")]
+    #[must_use]
+    pub fn version(&self) -> c_uint {
+        // SAFETY: `self.as_ptr()` addresses the live backend this handle borrows; the
+        // projection forms no reference to it.
+        let version_ptr = unsafe { &raw const (*self.as_ptr()).version };
+        // SAFETY: a read through the shared handle's pointer to a live backend; any value
+        // is a valid `c_uint`.
+        unsafe { version_ptr.read() }
+    }
+
+    /// Whether an odb holds the backend: `git_odb_add_backend` records the odb in it,
+    /// and refuses a backend another odb holds. A backend its constructor just built is
+    /// in none.
+    ///
+    /// The record is only compared, never followed: it does not keep the odb alive.
+    ///
+    /// Wraps `fld::git_odb_backend.odb`
+    #[doc(alias = "git_odb_backend.odb")]
+    #[must_use]
+    pub fn in_odb(&self) -> bool {
+        !self.odb_ptr().is_null()
+    }
+
+    /// Whether `odb` is the odb that holds the backend (see [`in_odb`](Self::in_odb)).
+    ///
+    /// Wraps `fld::git_odb_backend.odb`
+    #[doc(alias = "git_odb_backend.odb")]
+    #[must_use]
+    pub fn belongs_to(&self, odb: OdbRef<'_, '_>) -> bool {
+        ptr::eq(self.odb_ptr(), odb.as_ptr().cast::<ffi::git_odb>())
+    }
+
+    /// The odb the backend records, as an address only.
+    fn odb_ptr(&self) -> *const ffi::git_odb {
+        // SAFETY: as in `version`.
+        let odb_ptr = unsafe { &raw const (*self.as_ptr()).odb };
+        // SAFETY: a read through the shared handle's pointer to a live backend; any value
+        // is a valid raw pointer, which is only compared.
+        unsafe { odb_ptr.read() }.cast_const()
+    }
+
+    /// Whether the backend reads whole objects by id (`read`), as libgit2's loose and
+    /// packed backends do. An odb asks each backend that does, in priority order.
+    ///
+    /// Wraps `fld::git_odb_backend.read`
+    #[doc(alias = "git_odb_backend.read")]
+    #[must_use]
+    pub fn has_read(&self) -> bool {
+        member!(self.as_ptr(), read).is_some()
+    }
+
+    /// Whether the backend reads an object by a unique id prefix (`read_prefix`), as
+    /// libgit2's loose and packed backends do.
+    ///
+    /// Wraps `fld::git_odb_backend.read_prefix`
+    #[doc(alias = "git_odb_backend.read_prefix")]
+    #[must_use]
+    pub fn has_read_prefix(&self) -> bool {
+        member!(self.as_ptr(), read_prefix).is_some()
+    }
+
+    /// Whether the backend reads an object's size and type alone (`read_header`), as
+    /// libgit2's loose and packed backends do.
+    ///
+    /// Wraps `fld::git_odb_backend.read_header`
+    #[doc(alias = "git_odb_backend.read_header")]
+    #[must_use]
+    pub fn has_read_header(&self) -> bool {
+        member!(self.as_ptr(), read_header).is_some()
+    }
+
+    /// Whether the backend writes whole objects (`write`), as libgit2's loose backend
+    /// does and its packed backend does not. An odb writes to the first main backend
+    /// that does.
+    ///
+    /// Wraps `fld::git_odb_backend.write`
+    #[doc(alias = "git_odb_backend.write")]
+    #[must_use]
+    pub fn has_write(&self) -> bool {
+        member!(self.as_ptr(), write).is_some()
+    }
+
+    /// Whether the backend opens write streams (`writestream`), as libgit2's loose
+    /// backend does. An odb fakes a stream over `write` for a backend that does not.
+    ///
+    /// Wraps `fld::git_odb_backend.writestream`
+    #[doc(alias = "git_odb_backend.writestream")]
+    #[must_use]
+    pub fn has_write_stream(&self) -> bool {
+        member!(self.as_ptr(), writestream).is_some()
+    }
+
+    /// Whether the backend opens read streams (`readstream`), as libgit2's loose backend
+    /// does and its packed backend does not.
+    ///
+    /// Wraps `fld::git_odb_backend.readstream`
+    #[doc(alias = "git_odb_backend.readstream")]
+    #[must_use]
+    pub fn has_read_stream(&self) -> bool {
+        member!(self.as_ptr(), readstream).is_some()
+    }
+
+    /// Whether the backend answers whether it holds an object (`exists`), as libgit2's
+    /// loose and packed backends do.
+    ///
+    /// Wraps `fld::git_odb_backend.exists`
+    #[doc(alias = "git_odb_backend.exists")]
+    #[must_use]
+    pub fn has_exists(&self) -> bool {
+        member!(self.as_ptr(), exists).is_some()
+    }
+
+    /// Whether the backend expands a unique id prefix (`exists_prefix`), as libgit2's
+    /// loose and packed backends do.
+    ///
+    /// Wraps `fld::git_odb_backend.exists_prefix`
+    #[doc(alias = "git_odb_backend.exists_prefix")]
+    #[must_use]
+    pub fn has_exists_prefix(&self) -> bool {
+        member!(self.as_ptr(), exists_prefix).is_some()
+    }
+
+    /// Whether the backend rescans its store (`refresh`), as libgit2's packed backend
+    /// does and its loose backend, which reads the file system afresh each time, does
+    /// not. An odb whose lookup misses asks only these backends again.
+    ///
+    /// Wraps `fld::git_odb_backend.refresh`
+    #[doc(alias = "git_odb_backend.refresh")]
+    #[must_use]
+    pub fn has_refresh(&self) -> bool {
+        member!(self.as_ptr(), refresh).is_some()
+    }
+
+    /// Whether the backend walks its objects (`foreach`), as libgit2's loose and packed
+    /// backends do. libgit2's own walk calls the member of every backend without
+    /// checking.
+    ///
+    /// Wraps `fld::git_odb_backend.foreach`
+    #[doc(alias = "git_odb_backend.foreach")]
+    #[must_use]
+    pub fn has_foreach(&self) -> bool {
+        member!(self.as_ptr(), foreach).is_some()
+    }
+
+    /// Whether the backend indexes incoming packfiles (`writepack`), as libgit2's packed
+    /// backend does.
+    ///
+    /// Wraps `fld::git_odb_backend.writepack`
+    #[doc(alias = "git_odb_backend.writepack")]
+    #[must_use]
+    pub fn has_writepack(&self) -> bool {
+        member!(self.as_ptr(), writepack).is_some()
+    }
+
+    /// Whether the backend writes a `multi-pack-index` (`writemidx`), as libgit2's
+    /// packed backend does.
+    ///
+    /// Wraps `fld::git_odb_backend.writemidx`
+    #[doc(alias = "git_odb_backend.writemidx")]
+    #[must_use]
+    pub fn has_write_multi_pack_index(&self) -> bool {
+        member!(self.as_ptr(), writemidx).is_some()
+    }
+
+    /// Whether the backend refreshes an object's last-used time (`freshen`), as
+    /// libgit2's loose and packed backends do. An odb asked to write an object it
+    /// already holds freshens it instead.
+    ///
+    /// Wraps `fld::git_odb_backend.freshen`
+    #[doc(alias = "git_odb_backend.freshen")]
+    #[must_use]
+    pub fn has_freshen(&self) -> bool {
+        member!(self.as_ptr(), freshen).is_some()
+    }
+
+    /// Whether the backend can be released (`free`): every backend but the template
+    /// [`OdbBackend::new`] builds. [`OdbBackendFree`] calls it.
+    ///
+    /// Wraps `fld::git_odb_backend.free`
+    #[doc(alias = "git_odb_backend.free")]
+    #[must_use]
+    pub fn has_free(&self) -> bool {
+        member!(self.as_ptr(), free).is_some()
+    }
+}
+
+impl OdbBackendMut<'_> {
+    /// Rescans the backend's store, as `git_odb_refresh` does for each backend of an
+    /// odb: libgit2's packed backend reloads its packs and its `multi-pack-index`.
+    ///
+    /// A backend without the member ([`has_refresh`](OdbBackendRef::has_refresh)) has
+    /// nothing to rescan, and succeeds, as the odb skips it.
+    ///
+    /// Wraps `fld::git_odb_backend.refresh`
+    ///
+    /// # Errors
+    ///
+    /// Fails with the backend's code and error: libgit2's packed backend fails with
+    /// [`ErrorCode::NotFound`] when its pack directory is gone.
+    #[doc(alias = "git_odb_backend.refresh")]
+    pub fn refresh(&mut self) -> Result<(), OdbError> {
+        let backend = self.as_mut_ptr();
+        let Some(refresh) = member!(backend, refresh) else {
+            return Ok(());
+        };
+        // SAFETY: `refresh` is the member the backend's implementation set; `backend`
+        // addresses the live backend this exclusive handle borrows, which nothing else
+        // uses during the call.
+        member_status(unsafe { refresh(backend) })
+    }
+
+    /// Calls `callback` with the id of each object the backend holds, as
+    /// `git_odb_foreach` does for each backend of an odb, in the backend's own order
+    /// (libgit2's packed backend rescans its packs first).
+    ///
+    /// Returns [`ControlFlow::Continue`] once every object was visited, and
+    /// [`ControlFlow::Break`] with the code the closure stopped the walk with; libgit2's
+    /// backends then leave a `GIT_ERROR_CALLBACK` error ("`git_odb_foreach` callback
+    /// returned …") on the thread, unless one is set already. A panic in the closure
+    /// stops the walk and resumes here.
+    ///
+    /// Wraps `fld::git_odb_backend.foreach`
+    ///
+    /// # Errors
+    ///
+    /// Fails with the backend's code and error when the walk fails (libgit2's packed
+    /// backend when it cannot rescan its packs or read an index), and with `GIT_ERROR`
+    /// and a `GIT_ERROR_ODB` error when the backend has no `foreach` member, which
+    /// libgit2 would call through NULL.
+    #[doc(alias = "git_odb_backend.foreach")]
+    pub fn foreach(
+        &mut self,
+        callback: &mut ForeachCallback<'_>,
+    ) -> Result<ControlFlow<NonZero<c_int>>, OdbError> {
+        let backend = self.as_mut_ptr();
+        let foreach = member!(backend, foreach).ok_or_else(|| unset_member("foreach"))?;
+        let rc = callback.walk_with(|cb, payload| {
+            // SAFETY: `foreach` is the member the backend's implementation set; `backend`
+            // addresses the live backend this exclusive handle borrows; `cb` is the
+            // callback's trampoline and `payload` the callback, which `walk_with` lends
+            // for the walk alone, and which the backend calls on this thread before
+            // returning.
+            unsafe { foreach(backend, cb, payload) }
+        });
+        match callback.stopped {
+            // The walk stops at the closure's first break, and returns its code.
+            Some(code) if code.get() == rc => Ok(ControlFlow::Break(code)),
+            _ if rc == 0 => Ok(ControlFlow::Continue(())),
+            _ => Err(OdbError::from_libgit2(rc)),
+        }
+    }
+
+    /// Writes a `multi-pack-index` over every pack of the backend, then reloads it, as
+    /// [`OdbRef::write_multi_pack_index`] does for each backend of an odb.
+    ///
+    /// Safe here, unlike over the odb: the exclusive handle proves that nothing else uses
+    /// the backend, whose packs libgit2 walks unlocked.
+    ///
+    /// Wraps `fld::git_odb_backend.writemidx`
+    ///
+    /// # Errors
+    ///
+    /// Fails with the backend's code and error when a pack index cannot be read or the
+    /// file cannot be written, and with `GIT_ERROR` and a `GIT_ERROR_ODB` error when the
+    /// backend has no `writemidx` member
+    /// ([`has_write_multi_pack_index`](OdbBackendRef::has_write_multi_pack_index)).
+    #[doc(alias = "git_odb_backend.writemidx")]
+    pub fn write_multi_pack_index(&mut self) -> Result<(), OdbError> {
+        let backend = self.as_mut_ptr();
+        let writemidx = member!(backend, writemidx).ok_or_else(|| unset_member("writemidx"))?;
+        // SAFETY: `writemidx` is the member the backend's implementation set; `backend`
+        // addresses the live backend this exclusive handle borrows, which nothing else
+        // uses during the call.
+        member_status(unsafe { writemidx(backend) })
+    }
+}
+
+impl fmt::Debug for OdbBackendRef<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OdbBackendRef")
+            .field("version", &self.version())
+            .field("in_odb", &self.in_odb())
+            .field("has_read", &self.has_read())
+            .field("has_write", &self.has_write())
+            .field("has_foreach", &self.has_foreach())
+            .field("has_free", &self.has_free())
+            .finish_non_exhaustive()
+    }
+}
+
+impl fmt::Debug for OdbBackendMut<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl fmt::Debug for OdbBackend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
     }
 }
 
@@ -4384,7 +4891,7 @@ mod unit_tests {
                 // SAFETY: `raw` is a live stream in Rust storage, only read through the
                 // handle while it lives.
                 let s = unsafe { OdbStreamRef::from_ptr(&raw mut raw) }.unwrap();
-                assert_eq!(s.backend().addr(), 0x1000);
+                assert_eq!(s.backend().map(|b| b.as_ptr().addr()), Some(0x1000));
                 assert_eq!(s.mode(), ffi::GIT_STREAM_RW);
                 assert_eq!(s.has_hash_ctx(), members);
                 if members {
@@ -4514,7 +5021,7 @@ mod unit_tests {
         fn writepack_members_run_in_order_and_free_once() {
             let log = RefCell::new(Vec::new());
             let mut wp = pack(&log, true);
-            assert!(wp.as_ref().backend().is_null());
+            assert!(wp.as_ref().backend().is_none());
             assert!(format!("{:?}", wp.as_mut()).starts_with("OdbWritepackRef"));
             let mut stats = IndexerProgress::default();
             wp.as_mut().append(b"abc", stats.as_mut()).unwrap();
@@ -4822,6 +5329,272 @@ mod unit_tests {
             assert_eq!(rc, ErrorCode::User.raw());
             drop(callback);
             assert_eq!(calls, 0);
+        }
+    }
+
+    /// `git_odb_backend`'s internals: the release policy over a present and an absent
+    /// `free` member, the members dispatched through the exclusive handle (with the
+    /// break of a walk told from its failure), and the odb record, over a backend built
+    /// here in C's layout.
+    mod backend {
+        use std::cell::Cell;
+
+        use super::super::*;
+
+        /// The libgit2 calls below (setting an error) need the runtime pinned.
+        fn init() {
+            assert!(runtime_pinned());
+        }
+
+        /// A custom backend in C's layout: the base first, as libgit2's own backends
+        /// lay it out, then the state its members read.
+        #[repr(C)]
+        struct Fake<'c> {
+            base: ffi::git_odb_backend,
+            /// How often `free` ran.
+            frees: &'c Cell<u32>,
+            /// The ids `foreach` walks.
+            ids: Vec<Oid>,
+            /// What `foreach` returns after a full walk, and `refresh` and `writemidx`
+            /// return.
+            rc: c_int,
+            /// How often `refresh` and `writemidx` ran.
+            calls: &'c Cell<u32>,
+        }
+
+        impl<'c> Fake<'c> {
+            /// A backend with every member this module dispatches, and `free` when
+            /// `with_free`.
+            fn new(frees: &'c Cell<u32>, calls: &'c Cell<u32>, with_free: bool) -> Box<Self> {
+                // `git_odb_init_backend`'s template, built without C so that Miri runs
+                // the release tests.
+                let mut base = ffi::git_odb_backend {
+                    version: ffi::GIT_ODB_BACKEND_VERSION,
+                    ..ffi::git_odb_backend::default()
+                };
+                base.foreach = Some(Self::foreach);
+                base.refresh = Some(Self::refresh);
+                base.writemidx = Some(Self::writemidx);
+                base.free = if with_free { Some(Self::free) } else { None };
+                Box::new(Self {
+                    base,
+                    frees,
+                    ids: vec![Oid::zero(OidType::Sha1); 3],
+                    rc: 0,
+                    calls,
+                })
+            }
+
+            /// Adopts the backend into an owner, which releases it through `free`.
+            fn adopt(self: Box<Self>) -> OdbBackendBox {
+                // SAFETY: a complete backend, held by nothing else, whose `free`, when set,
+                // releases exactly this `Box`.
+                unsafe { OdbBackendBox::from_c(Box::into_raw(self).cast()) }.unwrap()
+            }
+
+            /// # Safety
+            ///
+            /// `backend` must be the base of a live `Fake`, used by nothing else.
+            unsafe fn this<'a>(backend: *mut ffi::git_odb_backend) -> &'a mut Self {
+                // SAFETY: per this function's contract; the base is at offset zero, and
+                // the reference covers the Rust-owned container.
+                unsafe { &mut *backend.cast::<Self>() }
+            }
+
+            unsafe extern "C" fn free(backend: *mut ffi::git_odb_backend) {
+                // SAFETY: libgit2's contract for `free`: the backend's own allocation,
+                // given up; it is a `Box<Fake>` (`adopt`).
+                let this = unsafe { Box::from_raw(backend.cast::<Self>()) };
+                this.frees.set(this.frees.get() + 1);
+            }
+
+            unsafe extern "C" fn foreach(
+                backend: *mut ffi::git_odb_backend,
+                cb: ffi::git_odb_foreach_cb,
+                payload: *mut c_void,
+            ) -> c_int {
+                // SAFETY: the dispatching handle lends the live backend exclusively.
+                let this = unsafe { Self::this(backend) };
+                let cb = cb.unwrap();
+                for id in &this.ids {
+                    // SAFETY: the callback and payload the walk was given, with a live id.
+                    let rc = unsafe { cb(id.as_ref().as_ptr(), payload) };
+                    if rc != 0 {
+                        // A walk that fails after the break returns its own code instead.
+                        return if this.rc < 0 { this.rc } else { rc };
+                    }
+                }
+                this.rc
+            }
+
+            unsafe extern "C" fn refresh(backend: *mut ffi::git_odb_backend) -> c_int {
+                // SAFETY: as in `foreach`.
+                let this = unsafe { Self::this(backend) };
+                this.calls.set(this.calls.get() + 1);
+                this.rc
+            }
+
+            unsafe extern "C" fn writemidx(backend: *mut ffi::git_odb_backend) -> c_int {
+                // SAFETY: as in `foreach`.
+                unsafe { Self::refresh(backend) }
+            }
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls C")]
+        fn the_template_has_no_members_and_dispatch_fails_as_unset() {
+            init();
+            let mut template = OdbBackend::default();
+            let r = template.as_ref();
+            assert_eq!(r.version(), ffi::GIT_ODB_BACKEND_VERSION);
+            assert!(!r.in_odb());
+            let present = [
+                r.has_read(),
+                r.has_read_prefix(),
+                r.has_read_header(),
+                r.has_write(),
+                r.has_write_stream(),
+                r.has_read_stream(),
+                r.has_exists(),
+                r.has_exists_prefix(),
+                r.has_refresh(),
+                r.has_foreach(),
+                r.has_writepack(),
+                r.has_write_multi_pack_index(),
+                r.has_freshen(),
+                r.has_free(),
+            ];
+            assert_eq!(present, [false; 14]);
+            assert!(format!("{template:?}").contains("has_free: false"));
+            let mut m = template.as_mut();
+            assert!(format!("{m:?}").contains("version: 1"));
+            m.refresh().unwrap();
+            let mut count = |_: OidRef<'_>| ControlFlow::Continue(());
+            let err = m
+                .foreach(&mut ForeachCallback::new(&mut count))
+                .unwrap_err();
+            assert_eq!(err.code(), Some(ErrorCode::Generic));
+            assert_eq!(err.class(), Some(ErrorClass::Odb));
+            assert_eq!(err.message(), c"odb backend does not implement 'foreach'");
+            let err = m.write_multi_pack_index().unwrap_err();
+            assert_eq!(err.message(), c"odb backend does not implement 'writemidx'");
+        }
+
+        #[test]
+        fn the_policy_frees_once_through_the_member() {
+            let (frees, calls) = (Cell::new(0), Cell::new(0));
+            let backend = Fake::new(&frees, &calls, true).adopt();
+            assert!(backend.as_ref().has_free() && backend.as_ref().has_foreach());
+            assert_eq!(frees.get(), 0);
+            drop(backend);
+            assert_eq!(frees.get(), 1);
+        }
+
+        #[test]
+        fn a_backend_without_free_is_left_alone() {
+            let (frees, calls) = (Cell::new(0), Cell::new(0));
+            let raw = Box::into_raw(Fake::new(&frees, &calls, false));
+            // SAFETY: a complete backend, held by nothing else; with no `free` member the
+            // owner releases nothing, so `raw` stays valid past it.
+            let backend = unsafe { OdbBackendBox::from_c(raw.cast()) }.unwrap();
+            assert!(!backend.as_ref().has_free());
+            drop(backend);
+            // SAFETY: the owner left the `Box` alone; it is reclaimed once, here.
+            drop(unsafe { Box::from_raw(raw) });
+            assert_eq!(frees.get(), 0);
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls C")]
+        fn refresh_and_writemidx_take_only_negative_codes_as_errors() {
+            init();
+            let (frees, calls) = (Cell::new(0), Cell::new(0));
+            let mut fake = Fake::new(&frees, &calls, true);
+            fake.rc = 3;
+            let mut backend = fake.adopt();
+            backend.as_mut().refresh().unwrap();
+            backend.as_mut().write_multi_pack_index().unwrap();
+            assert_eq!(calls.get(), 2);
+            // SAFETY: the owner's live backend, a `Fake`, used by nothing else meanwhile.
+            unsafe { Fake::this(backend.as_c_ptr()) }.rc = -9;
+            set(ErrorClass::Odb, c"refresh failed");
+            let err = backend.as_mut().refresh().unwrap_err();
+            assert_eq!((err.raw_code(), err.message()), (-9, c"refresh failed"));
+            let err = backend.as_mut().write_multi_pack_index().unwrap_err();
+            assert_eq!(err.raw_code(), -9);
+            assert_eq!(calls.get(), 4);
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls C")]
+        fn foreach_tells_a_break_from_a_failure() {
+            init();
+            let (frees, calls) = (Cell::new(0), Cell::new(0));
+            let mut backend = Fake::new(&frees, &calls, true).adopt();
+            let mut seen = Vec::new();
+            let mut collect = |id: OidRef<'_>| {
+                seen.push(id.to_oid());
+                ControlFlow::Continue(())
+            };
+            let flow = backend
+                .as_mut()
+                .foreach(&mut ForeachCallback::new(&mut collect));
+            assert_eq!(flow.unwrap(), ControlFlow::Continue(()));
+            assert_eq!(seen.len(), 3);
+            // A break whose code is an error code is still the closure's break.
+            for code in [-3, 1] {
+                let mut stop = |_: OidRef<'_>| ControlFlow::Break(NonZero::new(code).unwrap());
+                let flow = backend
+                    .as_mut()
+                    .foreach(&mut ForeachCallback::new(&mut stop));
+                assert_eq!(
+                    flow.unwrap(),
+                    ControlFlow::Break(NonZero::new(code).unwrap())
+                );
+            }
+            // A walk that fails, after a break or without one, is a failure.
+            // SAFETY: as in `refresh_and_writemidx_take_only_negative_codes_as_errors`.
+            unsafe { Fake::this(backend.as_c_ptr()) }.rc = -5;
+            let mut stop = |_: OidRef<'_>| ControlFlow::Break(NonZero::new(-3).unwrap());
+            let mut callback = ForeachCallback::new(&mut stop);
+            let err = backend.as_mut().foreach(&mut callback).unwrap_err();
+            assert_eq!(err.raw_code(), -5);
+            let mut go = |_: OidRef<'_>| ControlFlow::Continue(());
+            let err = backend
+                .as_mut()
+                .foreach(&mut ForeachCallback::new(&mut go))
+                .unwrap_err();
+            assert_eq!(err.raw_code(), -5);
+            // A callback reused after a break starts the next walk afresh.
+            // SAFETY: as above.
+            unsafe { Fake::this(backend.as_c_ptr()) }.rc = 0;
+            assert_eq!(
+                backend.as_mut().foreach(&mut callback).unwrap(),
+                ControlFlow::Break(NonZero::new(-3).unwrap())
+            );
+            let mut boom = |_: OidRef<'_>| -> ControlFlow<NonZero<c_int>> { panic!("boom") };
+            let mut callback = ForeachCallback::new(&mut boom);
+            let caught =
+                panic::catch_unwind(AssertUnwindSafe(|| backend.as_mut().foreach(&mut callback)));
+            assert_eq!(caught.unwrap_err().downcast_ref::<&str>(), Some(&"boom"));
+            drop(backend);
+            assert_eq!(frees.get(), 1);
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls C")]
+        fn the_odb_record_is_compared_only() {
+            let (frees, calls) = (Cell::new(0), Cell::new(0));
+            let odb = Odb::new().unwrap();
+            let other = Odb::new().unwrap();
+            let mut fake = Fake::new(&frees, &calls, true);
+            // As `git_odb_add_backend` records it; the record is never followed.
+            fake.base.odb = odb.as_c_ptr();
+            let backend = fake.adopt();
+            assert!(backend.as_ref().in_odb());
+            assert!(backend.as_ref().belongs_to(odb.as_ref()));
+            assert!(!backend.as_ref().belongs_to(other.as_ref()));
+            assert!(format!("{:?}", backend.as_ref()).contains("in_odb: true"));
         }
     }
 }

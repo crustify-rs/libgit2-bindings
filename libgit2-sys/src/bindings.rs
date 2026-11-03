@@ -531,6 +531,7 @@ pub const LIBGIT2_VERSION_REVISION: u32 = 0;
 pub const GIT_CONFIG_BACKEND_VERSION: u32 = 1;
 pub const GIT_CONFIG_BACKEND_MEMORY_OPTIONS_VERSION: u32 = 1;
 pub const GIT_FILTER_VERSION: u32 = 1;
+pub const GIT_ODB_BACKEND_VERSION: u32 = 1;
 pub const GIT_REFDB_BACKEND_VERSION: u32 = 1;
 pub const GIT_REPOSITORY_NEW_OPTIONS_VERSION: u32 = 1;
 pub type __mode_t = ::std::os::raw::c_uint;
@@ -13425,6 +13426,18 @@ impl Default for git_odb_backend {
             s.assume_init()
         }
     }
+}
+unsafe extern "C" {
+    /** Initializes a `git_odb_backend` with default values. Equivalent to
+ creating an instance with GIT_ODB_BACKEND_INIT.
+
+ @param backend the `git_odb_backend` struct to initialize.
+ @param version Version the struct; pass `GIT_ODB_BACKEND_VERSION`
+ @return Zero on success; -1 on failure.*/
+    pub fn git_odb_init_backend(
+        backend: *mut git_odb_backend,
+        version: ::std::os::raw::c_uint,
+    ) -> ::std::os::raw::c_int;
 }
 unsafe extern "C" {
     /** Allocate data for an ODB object.  Custom ODB backends may use this

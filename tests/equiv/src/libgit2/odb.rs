@@ -23,6 +23,7 @@
 //! a C caller's `git_odb_free` leaves it, and an odb must outlive a repository freed
 //! first in both.
 
+mod backend;
 mod stream;
 mod sys;
 

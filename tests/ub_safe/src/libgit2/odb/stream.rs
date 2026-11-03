@@ -123,7 +123,7 @@ fn fresh_write_stream(stream: &OdbStreamBox<'_>, size: u64, kind: OidType) {
     assert_eq!(s.mode(), ffi::GIT_STREAM_WRONLY);
     assert!(s.has_hash_ctx());
     assert!(s.can_write() && s.can_finalize_write() && !s.can_read());
-    assert!(!s.backend().is_null());
+    assert!(s.backend().is_some_and(|b| b.version() == 1 && b.in_odb()));
     assert!(format!("{s:?}").starts_with("OdbStreamRef"));
 }
 
@@ -238,7 +238,10 @@ fn read_streams_read_what_was_written() {
             assert!(s.has_hash_ctx());
             assert_eq!((s.mode(), s.declared_size(), s.received_bytes()), (0, 0, 0));
             assert!(s.oid_type().is_err());
-            assert!(!s.backend().is_null());
+            assert!(
+                s.backend()
+                    .is_some_and(|b| b.has_read_stream() && b.in_odb())
+            );
 
             let mut back = Vec::new();
             let mut buf = [0_u8; 333];
@@ -407,7 +410,11 @@ fn writepacks_take_a_pack_in_pieces_and_commit_it() {
         let odb = Odb::open_with_oid_type(&dir.objects(&format!("p{}", kind.raw())), kind).unwrap();
         for piece in [1, 7, 4096, pack.len()] {
             let mut wp = write_pack(&odb).unwrap();
-            assert!(!wp.as_ref().backend().is_null());
+            assert!(
+                wp.as_ref()
+                    .backend()
+                    .is_some_and(|b| b.has_writepack() && b.in_odb())
+            );
             assert!(format!("{:?}", wp.as_mut()).starts_with("OdbWritepackRef"));
             let mut stats = IndexerProgress::default();
             for chunk in pack.chunks(piece) {

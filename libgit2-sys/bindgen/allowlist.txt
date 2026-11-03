@@ -176,6 +176,7 @@ function git_odb_exists_prefix
 function git_odb_expand_ids
 function git_odb_foreach
 function git_odb_free
+function git_odb_init_backend
 function git_odb_new
 function git_odb_new_ext
 function git_odb_num_backends
@@ -674,6 +675,7 @@ var GIT_COMMIT_CREATE_OPTIONS_VERSION
 var GIT_CONFIG_BACKEND_MEMORY_OPTIONS_VERSION
 var GIT_FILTER_VERSION
 var GIT_INDEX_OPTIONS_VERSION
+var GIT_ODB_BACKEND_VERSION
 var GIT_ODB_OPTIONS_VERSION
 var GIT_OBJECT_ID_OPTIONS_VERSION
 var GIT_OID_MAX_HEXSIZE
