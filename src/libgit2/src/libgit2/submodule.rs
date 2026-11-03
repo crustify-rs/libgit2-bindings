@@ -17,8 +17,8 @@ use crate::ffi;
 /// without a variant ("invalid value for fetchRecurseSubmodules"), and
 /// [`from_raw`](Self::from_raw) gives `None` for it.
 ///
-/// Wraps: `git_submodule_recurse_t`
-/// Handwritten
+/// Wraps `ty::git_submodule_recurse_t`
+#[doc(alias = "git_submodule_recurse_t")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u32)]
 #[non_exhaustive]
@@ -76,8 +76,6 @@ impl From<SubmoduleRecurse> for ffi::git_submodule_recurse_t {
 
 /// A submodule recursion setting that this version of libgit2's header does not
 /// name, which libgit2 refuses to write. [`raw`](Self::raw) has it.
-///
-/// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct UnnamedSubmoduleRecurse(ffi::git_submodule_recurse_t);
 
@@ -116,8 +114,8 @@ impl std::error::Error for UnnamedSubmoduleRecurse {}
 /// gives `None` for it, and `from_raw(raw).unwrap_or_default()` resolves it as
 /// libgit2 does.
 ///
-/// Wraps: `git_submodule_update_t`
-/// Handwritten
+/// Wraps `ty::git_submodule_update_t`
+#[doc(alias = "git_submodule_update_t")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u32)]
 #[non_exhaustive]
@@ -179,8 +177,6 @@ impl From<SubmoduleUpdate> for ffi::git_submodule_update_t {
 /// A submodule update setting without a [`SubmoduleUpdate`] variant:
 /// `GIT_SUBMODULE_UPDATE_DEFAULT` (0), or a value this version of libgit2's header
 /// does not name. libgit2 refuses to write either. [`raw`](Self::raw) has it.
-///
-/// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct UnnamedSubmoduleUpdate(ffi::git_submodule_update_t);
 
@@ -217,8 +213,8 @@ impl std::error::Error for UnnamedSubmoduleUpdate {}
 /// zeroed options struct) as `Unspecified`; [`from_raw`](Self::from_raw) gives `None`
 /// for all of them. libgit2's own routines return only named values.
 ///
-/// Wraps: `git_submodule_ignore_t`
-/// Handwritten
+/// Wraps `ty::git_submodule_ignore_t`
+#[doc(alias = "git_submodule_ignore_t")]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[repr(i32)]
 #[non_exhaustive]
@@ -279,8 +275,6 @@ impl From<SubmoduleIgnore> for ffi::git_submodule_ignore_t {
 /// A submodule ignore value that this version of libgit2's header does not name: `0`,
 /// which a zeroed diff options struct holds, or anything outside `-1` and `1..=4`.
 /// [`raw`](Self::raw) has it.
-///
-/// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct UnnamedSubmoduleIgnore(pub(crate) ffi::git_submodule_ignore_t);
 
