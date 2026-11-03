@@ -43727,7 +43727,7 @@
         {
           "index": 162,
           "name": "src/libgit2/indexer.c",
-          "status": "todo",
+          "status": "frozen",
           "foundational": false,
           "depends_on": {
             "scheduled": [

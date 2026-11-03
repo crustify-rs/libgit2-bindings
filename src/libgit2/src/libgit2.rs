@@ -14,6 +14,7 @@ pub mod diff_parse;
 pub mod fetchhead;
 pub mod filter;
 pub mod index;
+pub mod indexer;
 pub mod iterator;
 pub mod libgit2;
 pub mod mailmap;
