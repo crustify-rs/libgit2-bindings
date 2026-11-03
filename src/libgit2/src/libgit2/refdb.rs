@@ -143,8 +143,8 @@ use crate::libgit2::src::util::errors::{ErrorBuf, last, runtime_pinned};
 /// }
 /// ```
 ///
-/// Wraps: `git_refdb`
-/// Handwritten
+/// Wraps `ty::git_refdb`
+#[doc(alias = "git_refdb")]
 #[repr(transparent)]
 pub struct Refdb<'r>(
     ffi::git_refdb,
@@ -152,16 +152,12 @@ pub struct Refdb<'r>(
 );
 
 /// Shared borrow of a [`Refdb`]. `Copy`, like `&T`.
-///
-/// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct RefdbRef<'a, 'r>(CBorrowedPtr<'a, Refdb<'r>>);
 
 /// Exclusive borrow of a [`Refdb`]. Reaches the shared handle with
 /// [`as_ref`](Self::as_ref).
-///
-/// Handwritten
 #[repr(transparent)]
 pub struct RefdbMut<'a, 'r>(
     RefdbRef<'a, 'r>,
@@ -222,9 +218,6 @@ impl fmt::Debug for RefdbMut<'_, '_> {
 /// Releases one reference to a refdb through `git_refdb_free`, the down-ref: the last
 /// one frees the backend (through its `free` member) and then the refdb, unless a
 /// repository still owns it, in which case the repository frees it when it lets go.
-///
-/// Wraps: `git_refdb_free`
-/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct RefdbFree;
 
@@ -232,6 +225,8 @@ pub struct RefdbFree;
 // of a box or an arc holds it: the refdb is freed once, when its count reaches zero
 // and no repository owns it. It needs no state beyond the pointer.
 unsafe impl<'r> CDrop<Refdb<'r>> for RefdbFree {
+    /// Wraps `fn::git_refdb_free`
+    #[doc(alias = "git_refdb_free")]
     unsafe fn c_drop(&self, ptr: NonNull<Refdb<'r>>) {
         // SAFETY: per `c_drop`'s contract, `ptr` addresses a live refdb whose reference
         // the caller gives up; `Refdb` is transparent over `git_refdb`. Its repository
@@ -273,13 +268,14 @@ impl<'r> Refdb<'r> {
     /// drop(db);
     /// ```
     ///
-    /// Wraps: `git_refdb_open`
+    /// Wraps `fn::git_refdb_open`
     ///
     /// # Errors
     ///
     /// Fails, with libgit2's error, when the backend cannot be set up, or when the
     /// repository's reference storage format is unknown (`GIT_EINVALID`, "unknown
     /// reference storage format").
+    #[doc(alias = "git_refdb_open")]
     pub fn open(repo: RepositoryRef<'r>) -> Result<RefdbBox<'r>, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
@@ -327,7 +323,8 @@ impl<'r> Refdb<'r> {
     /// specifies for a backend of `repo`, and whose `free` member releases it. When the
     /// call succeeds, the caller must no longer use or free `backend`.
     ///
-    /// Wraps: `git_refdb_new`
+    /// Wraps `fn::git_refdb_new`
+    #[doc(alias = "git_refdb_new")]
     pub unsafe fn new(
         repo: RepositoryRef<'r>,
         backend: NonNull<ffi::git_refdb_backend>,
@@ -367,8 +364,8 @@ const _: () = assert!(size_of::<RefdbBox<'static>>() == size_of::<*mut ffi::git_
 /// [`from_raw`](Self::from_raw) gives `None` for every value the header does not name,
 /// `0` included, which an options struct reads as [`RefdbType::default`].
 ///
-/// Wraps: `git_refdb_t`
-/// Handwritten
+/// Wraps `ty::git_refdb_t`
+#[doc(alias = "git_refdb_t")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u32)]
 #[non_exhaustive]
@@ -423,8 +420,6 @@ impl From<RefdbType> for ffi::git_refdb_t {
 /// A reference database format that this version of libgit2's header does not name:
 /// `0`, which an options struct reads as the default, or a value libgit2 records as
 /// an unknown format. [`raw`](Self::raw) has it.
-///
-/// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct UnnamedRefdbType(ffi::git_refdb_t);
 
