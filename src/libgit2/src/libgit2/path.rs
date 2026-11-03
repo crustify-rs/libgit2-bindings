@@ -23,8 +23,8 @@ use crate::ffi;
 /// [`from_raw`](Self::from_raw) gives `None` for every value the header does not name,
 /// all of which `git_path_is_gitfile` refuses.
 ///
-/// Wraps: `git_path_gitfile`
-/// Handwritten
+/// Wraps `ty::git_path_gitfile`
+#[doc(alias = "git_path_gitfile")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u32)]
 pub enum GitFile {
@@ -72,8 +72,6 @@ impl From<GitFile> for ffi::git_path_gitfile {
 
 /// A `git_path_gitfile` value that libgit2's header does not name, which
 /// `git_path_is_gitfile` refuses. [`raw`](Self::raw) has it.
-///
-/// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct UnnamedGitFile(ffi::git_path_gitfile);
 
@@ -99,8 +97,8 @@ impl std::error::Error for UnnamedGitFile {}
 /// `GIT_ERROR_OS`, "invalid filesystem for path validation: " and the text of whatever
 /// `errno` held; [`from_raw`](Self::from_raw) gives `None` for exactly those.
 ///
-/// Wraps: `git_path_fs`
-/// Handwritten
+/// Wraps `ty::git_path_fs`
+#[doc(alias = "git_path_fs")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u32)]
 pub enum Filesystem {
@@ -149,8 +147,6 @@ impl From<Filesystem> for ffi::git_path_fs {
 
 /// A `git_path_fs` value that libgit2's header does not name, and its path checks
 /// refuse. [`raw`](Self::raw) has it.
-///
-/// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct UnnamedFilesystem(ffi::git_path_fs);
 
@@ -203,7 +199,8 @@ impl std::error::Error for UnnamedFilesystem {}
 /// ));
 /// ```
 ///
-/// Wraps: `git_path_is_gitfile`
+/// Wraps `fn::git_path_is_gitfile`
+#[doc(alias = "git_path_is_gitfile")]
 #[must_use]
 pub fn is_gitfile(component: &CStr, file: GitFile, fs: Filesystem) -> bool {
     let len = component.count_bytes();
