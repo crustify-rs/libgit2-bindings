@@ -82,7 +82,8 @@ define_ctype!(
     /// never holds a NULL member. Read and replace members through
     /// [`as_ref`](Self::as_ref) / [`as_mut`](Self::as_mut).
     ///
-    /// Wraps: git_allocator
+    /// Wraps `ty::git_allocator`
+    #[doc(alias = "git_allocator")]
     #[derive(Clone, Copy)]
     Allocator,
     AllocatorRef,
@@ -191,7 +192,8 @@ impl AllocatorRef<'_> {
     /// The `malloc` member; `None` only in a value C left unset, never in one built
     /// here.
     ///
-    /// Field: `git_allocator.gmalloc`
+    /// Wraps `fld::git_allocator.gmalloc`
+    #[doc(alias = "git_allocator.gmalloc")]
     #[must_use]
     pub fn malloc(&self) -> Option<MallocFn> {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -204,7 +206,8 @@ impl AllocatorRef<'_> {
 
     /// The `realloc` member; `None` only in a value C left unset.
     ///
-    /// Field: `git_allocator.grealloc`
+    /// Wraps `fld::git_allocator.grealloc`
+    #[doc(alias = "git_allocator.grealloc")]
     #[must_use]
     pub fn realloc(&self) -> Option<ReallocFn> {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -216,7 +219,8 @@ impl AllocatorRef<'_> {
 
     /// The `free` member; `None` only in a value C left unset.
     ///
-    /// Field: `git_allocator.gfree`
+    /// Wraps `fld::git_allocator.gfree`
+    #[doc(alias = "git_allocator.gfree")]
     #[must_use]
     pub fn free(&self) -> Option<FreeFn> {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -241,7 +245,8 @@ impl fmt::Debug for AllocatorRef<'_> {
 impl AllocatorMut<'_> {
     /// Replaces the `malloc` member.
     ///
-    /// Field: `git_allocator.gmalloc`
+    /// Wraps `fld::git_allocator.gmalloc`
+    #[doc(alias = "git_allocator.gmalloc")]
     pub fn set_malloc(&mut self, malloc: MallocFn) {
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
         // forms no reference to it.
@@ -253,7 +258,8 @@ impl AllocatorMut<'_> {
 
     /// Replaces the `realloc` member.
     ///
-    /// Field: `git_allocator.grealloc`
+    /// Wraps `fld::git_allocator.grealloc`
+    #[doc(alias = "git_allocator.grealloc")]
     pub fn set_realloc(&mut self, realloc: ReallocFn) {
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
         // forms no reference to it.
@@ -264,7 +270,8 @@ impl AllocatorMut<'_> {
 
     /// Replaces the `free` member.
     ///
-    /// Field: `git_allocator.gfree`
+    /// Wraps `fld::git_allocator.gfree`
+    #[doc(alias = "git_allocator.gfree")]
     pub fn set_free(&mut self, free: FreeFn) {
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
         // forms no reference to it.
@@ -304,8 +311,6 @@ impl AllocatorMut<'_> {
 /// None of them may call into libgit2: libgit2 allocates through them, its per-thread
 /// error state included (`threadstate_get`), so a libgit2 call from inside one recurses
 /// without bound.
-///
-/// Handwritten
 pub unsafe trait Alloc {
     /// Allocates at least `len` bytes; `None` on failure.
     fn malloc(len: usize, file: Option<&CStr>, line: i32) -> Option<NonNull<u8>>;
