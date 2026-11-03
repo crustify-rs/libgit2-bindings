@@ -23906,7 +23906,7 @@
         {
           "index": 106,
           "name": "src/libgit2/diff_parse.c",
-          "status": "todo",
+          "status": "frozen",
           "foundational": false,
           "depends_on": {
             "scheduled": [
