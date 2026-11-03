@@ -132,8 +132,8 @@ use crate::libgit2::src::util::errors::{ErrorBuf, last, runtime_pinned};
 /// }
 /// ```
 ///
-/// Wraps: `git_odb`
-/// Handwritten
+/// Wraps `ty::git_odb`
+#[doc(alias = "git_odb")]
 #[repr(transparent)]
 pub struct Odb<'r>(
     ffi::git_odb,
@@ -141,16 +141,12 @@ pub struct Odb<'r>(
 );
 
 /// Shared borrow of an [`Odb`]. `Copy`, like `&T`; every odb routine takes it.
-///
-/// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct OdbRef<'a, 'r>(CBorrowedPtr<'a, Odb<'r>>);
 
 /// Exclusive borrow of an [`Odb`]. Reaches the shared handle with
 /// [`as_ref`](Self::as_ref); nothing lends one, since a repository may hold the odb.
-///
-/// Handwritten
 #[repr(transparent)]
 pub struct OdbMut<'a, 'r>(
     OdbRef<'a, 'r>,
@@ -238,10 +234,6 @@ impl fmt::Debug for OdbMut<'_, '_> {
 /// odb and its backends, unless a repository still owns it. Stateless. Also builds an
 /// odb no repository owns through `git_odb_new`, so [`OdbArc::new`](CArc::new) makes
 /// the odb [`Odb::new`] makes, reporting a failure as `None`.
-///
-/// Wraps: `git_odb_free`
-/// Wraps: `git_odb_new`
-/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OdbFree;
 
@@ -249,6 +241,8 @@ pub struct OdbFree;
 // freed once, when its count reaches zero and no repository owns it. It needs no state
 // beyond the pointer, and reaches no repository.
 unsafe impl<'r> CDrop<Odb<'r>> for OdbFree {
+    /// Wraps `fn::git_odb_free`
+    #[doc(alias = "git_odb_free")]
     unsafe fn c_drop(&self, ptr: NonNull<Odb<'r>>) {
         // SAFETY: per `c_drop`'s contract, `ptr` addresses a live odb whose reference
         // the caller gives up; `Odb` is transparent over `git_odb`.
@@ -260,6 +254,8 @@ unsafe impl<'r> CDrop<Odb<'r>> for OdbFree {
 // owning repository (so `'static`), that the caller owns and `git_odb_free` releases;
 // it leaves the slot NULL when it fails. The runtime is pinned before the call.
 unsafe impl CNew<Odb<'static>> for OdbFree {
+    /// Wraps `fn::git_odb_new`
+    #[doc(alias = "git_odb_new")]
     fn c_new(&self) -> Option<NonNull<Odb<'static>>> {
         if !runtime_pinned() {
             return None;
@@ -378,8 +374,6 @@ impl Odb<'static> {
     /// Nothing can be read from it or written to it until a backend is added. Fails,
     /// with libgit2's error, when the odb cannot be allocated.
     ///
-    /// Wraps: `git_odb_new`
-    ///
     /// # Errors
     ///
     /// Fails, with libgit2's error, when the odb cannot be allocated.
@@ -396,11 +390,12 @@ impl Odb<'static> {
     /// As [`new`](Self::new), which is this with [`OidType::Sha1`]; the object id type
     /// is the only setting `git_odb_options` holds.
     ///
-    /// Wraps: `git_odb_new_ext`
+    /// Wraps `fn::git_odb_new_ext`
     ///
     /// # Errors
     ///
     /// Fails as [`new`](Self::new) does.
+    #[doc(alias = "git_odb_new_ext")]
     pub fn with_oid_type(oid_type: OidType) -> Result<OdbArc<'static>, ErrorBuf> {
         let opts = options(oid_type);
         construct(|out| {
@@ -419,13 +414,14 @@ impl Odb<'static> {
     /// The directory must exist, but need not hold anything; an alternate that does not exist is
     /// skipped.
     ///
-    /// Wraps: `git_odb_open`
+    /// Wraps `fn::git_odb_open`
     ///
     /// # Errors
     ///
     /// Fails, with libgit2's error, when `objects_dir` cannot be examined (`GIT_ERROR_ODB`, `failed
     /// to load object database in '<dir>'`), when an `info/alternates` file cannot be read, or when
     /// memory runs out.
+    #[doc(alias = "git_odb_open")]
     pub fn open(objects_dir: &CStr) -> Result<OdbArc<'static>, ErrorBuf> {
         construct(|out| {
             // SAFETY: `out` is a writable slot, filled with a fresh reference on
@@ -441,11 +437,12 @@ impl Odb<'static> {
     /// As [`open`](Self::open), which is this with [`OidType::Sha1`]; the backends read
     /// and write ids of `oid_type`.
     ///
-    /// Wraps: `git_odb_open_ext`
+    /// Wraps `fn::git_odb_open_ext`
     ///
     /// # Errors
     ///
     /// Fails as [`open`](Self::open) does.
+    #[doc(alias = "git_odb_open_ext")]
     pub fn open_with_oid_type(
         objects_dir: &CStr,
         oid_type: OidType,
@@ -535,10 +532,6 @@ unsafe fn data_free(data: *mut u8) {
 ///
 /// let _ = OdbDataBox::<Frame>::new_zeroed();
 /// ```
-///
-/// Wraps: `git_odb_backend_data_alloc`
-/// Wraps: `git_odb_backend_data_free`
-/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OdbDataFree;
 
@@ -548,6 +541,8 @@ pub type OdbDataBox<T> = CBox<T, OdbDataFree>;
 // SAFETY: `git_odb_backend_data_free` releases the allocation exactly once, without
 // reading it, whether or not it holds a `T`; `self` carries no state.
 unsafe impl<T> CDrop<T> for OdbDataFree {
+    /// Wraps `fn::git_odb_backend_data_free`
+    #[doc(alias = "git_odb_backend_data_free")]
     #[inline]
     unsafe fn c_drop(&self, ptr: NonNull<T>) {
         // SAFETY: per `c_drop`'s contract `ptr` is a live allocation whose claim the
@@ -560,6 +555,8 @@ unsafe impl<T> CDrop<T> for OdbDataFree {
 // bytes, aligned to `DATA_ALIGN >= align_of::<T>()` (checked at compile time), which
 // `c_drop` above releases without reading.
 unsafe impl<T: CCell> CAlloc<T> for OdbDataFree {
+    /// Wraps `fn::git_odb_backend_data_alloc`
+    #[doc(alias = "git_odb_backend_data_alloc")]
     #[inline]
     fn c_alloc(&self) -> Option<NonNull<MaybeUninit<T>>> {
         const {
@@ -575,6 +572,8 @@ unsafe impl<T: CCell> CAlloc<T> for OdbDataFree {
 // SAFETY: as `CAlloc`, with every byte of the `T` zeroed before it is handed out, a
 // state `T: CZeroable` vouches for; `c_drop` accepts any `T` since it never reads it.
 unsafe impl<T: CZeroable> CAllocZeroed<T> for OdbDataFree {
+    /// Wraps `fn::git_odb_backend_data_alloc`
+    #[doc(alias = "git_odb_backend_data_alloc")]
     #[inline]
     fn c_alloc_zeroed(&self) -> Option<NonNull<T>> {
         const {
@@ -615,10 +614,6 @@ unsafe impl<T: CZeroable> CAllocZeroed<T> for OdbDataFree {
 ///
 /// [`new_uninit`]: Self::new_uninit
 /// [`new_zeroed`]: Self::new_zeroed
-///
-/// Wraps: `git_odb_backend_data_alloc`
-/// Wraps: `git_odb_backend_data_free`
-/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OdbDataArrayFree;
 
@@ -651,13 +646,21 @@ unsafe fn data_dup_len(src: *mut u8, byte_len: usize) -> *mut u8 {
     copy.as_ptr()
 }
 
-impl_clendrop!(OdbDataArrayFree, data_free_len);
+impl_clendrop!(
+    /// Wraps `fn::git_odb_backend_data_free`
+    #[doc(alias = "git_odb_backend_data_free")]
+    OdbDataArrayFree,
+    data_free_len
+);
 
 impl_clenclone!(OdbDataArrayFree, data_dup_len, align = DATA_ALIGN);
 
 impl OdbDataArrayFree {
     /// `len` uninitialised elements; `None` when the allocation fails or its size
     /// overflows. An empty request allocates nothing.
+    ///
+    /// Wraps `fn::git_odb_backend_data_alloc`
+    #[doc(alias = "git_odb_backend_data_alloc")]
     #[must_use]
     pub fn new_uninit<T>(len: usize) -> Option<OdbDataVec<MaybeUninit<T>>> {
         let data = Self::alloc_run::<T>(len)?;
@@ -670,6 +673,9 @@ impl OdbDataArrayFree {
 
     /// `len` zeroed elements; `None` when the allocation fails or its size
     /// overflows. An empty request allocates nothing.
+    ///
+    /// Wraps `fn::git_odb_backend_data_alloc`
+    #[doc(alias = "git_odb_backend_data_alloc")]
     #[must_use]
     pub fn new_zeroed<T: CPlainElem>(len: usize) -> Option<OdbDataVec<T>> {
         let data = Self::alloc_run::<T>(len)?;
@@ -748,22 +754,26 @@ unsafe fn str_dup_raw(s: *mut c_char) -> *mut c_char {
 /// that, where `from_raw` would free libgit2's static empty string.
 ///
 /// [`BufMut::take_str`]: crate::libgit2::src::libgit2::buf::BufMut::take_str
-///
-/// Wraps: `git_odb_backend_data_alloc`
-/// Wraps: `git_odb_backend_data_free`
-/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct OdbDataStrFree;
 
 /// One NUL-terminated string in libgit2's allocator.
 pub type OdbDataStr = CStrBox<OdbDataStrFree>;
 
-impl_cdrop_str!(OdbDataStrFree, str_free);
+impl_cdrop_str!(
+    /// Wraps `fn::git_odb_backend_data_free`
+    #[doc(alias = "git_odb_backend_data_free")]
+    OdbDataStrFree,
+    str_free
+);
 
 impl_cdupclone_str!(OdbDataStrFree, str_dup_raw);
 
 impl OdbDataStrFree {
     /// A copy of `s` in libgit2's allocator; `None` when the allocation fails.
+    ///
+    /// Wraps `fn::git_odb_backend_data_alloc`
+    #[doc(alias = "git_odb_backend_data_alloc")]
     #[must_use]
     pub fn dup(s: &CStr) -> Option<OdbDataStr> {
         let copy = str_dup(s)?;
@@ -792,10 +802,6 @@ const _: () = assert!(
 /// [`dup_all`](Self::dup_all) and `Clone` copy every string, as `git_strarray_copy`
 /// does; [`from_vec`](Self::from_vec) and [`into_vec`](Self::into_vec) move them
 /// between the run and a `Vec`, which is where a run grows or shrinks.
-///
-/// Wraps: `git_odb_backend_data_alloc`
-/// Wraps: `git_odb_backend_data_free`
-/// Handwritten
 #[repr(transparent)]
 pub struct OdbDataStrVec(OdbDataVec<OdbDataStr>);
 
