@@ -25,8 +25,6 @@ impl<'a, 'r> BlobRef<'a, 'r> {
     /// Another counted reference to the blob, as `git_blob_dup` takes one: the same
     /// blob, now also kept alive by the result, which may outlive this borrow but not
     /// the repository.
-    ///
-    /// Wraps: `git_blob_dup`
     #[expect(
         clippy::missing_panics_doc,
         reason = "cannot panic: a handle is never NULL"
@@ -47,11 +45,12 @@ impl<'a, 'r> BlobRef<'a, 'r> {
     /// full id a prefix found. Borrowed for as long as the handle: libgit2 keeps it in
     /// the blob, which writes it once, when it is read.
     ///
-    /// Wraps: `git_blob_id`
+    /// Wraps `fn::git_blob_id`
     ///
     /// # Panics
     ///
     /// Panics, with `a live blob has an id`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_blob_id")]
     #[must_use]
     pub fn id(&self) -> OidRef<'a> {
         // SAFETY: the handle addresses a live blob for `'a`; libgit2 only reads it, and
@@ -80,11 +79,12 @@ impl<'a, 'r> BlobRef<'a, 'r> {
     /// let _ = owner.path();
     /// ```
     ///
-    /// Wraps: `git_blob_owner`
+    /// Wraps `fn::git_blob_owner`
     ///
     /// # Panics
     ///
     /// Panics, with `a blob always has a repository`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_blob_owner")]
     #[must_use]
     pub fn owner(&self) -> RepositoryRef<'r> {
         // SAFETY: the handle addresses a live blob for `'a`, which libgit2 only reads.
@@ -106,10 +106,6 @@ impl<'a, 'r> BlobRef<'a, 'r> {
 /// database's copy of its content and frees the struct, never reading the repository;
 /// the copy increments the same count and hands back the same pointer. Neither can
 /// fail, and neither allocates.
-///
-/// Wraps: `git_blob_free`
-/// Wraps: `git_blob_dup`
-/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BlobFree;
 
@@ -118,6 +114,8 @@ pub struct BlobFree;
 // blob outlives the call through that reference, and is freed only once the count,
 // which a cache's reference is part of, reaches zero.
 unsafe impl<'r> CDrop<Blob<'r>> for BlobFree {
+    /// Wraps `fn::git_blob_free`
+    #[doc(alias = "git_blob_free")]
     unsafe fn c_drop(&self, ptr: NonNull<Blob<'r>>) {
         // SAFETY: per `c_drop`'s contract, `ptr` addresses a live blob of which the
         // caller gives up one reference; `Blob` is transparent over `git_blob`.
@@ -131,6 +129,8 @@ unsafe impl<'r> CDrop<Blob<'r>> for BlobFree {
 // `c_is_sole_owner` keeps its `false` default: a cache that keeps blobs counts a
 // reference no owner sees, and a later lookup may take another.
 unsafe impl<'r> CRefClone<Blob<'r>> for BlobFree {
+    /// Wraps `fn::git_blob_dup`
+    #[doc(alias = "git_blob_dup")]
     unsafe fn c_up_ref(&self, ptr: NonNull<Blob<'r>>) -> bool {
         let mut out = ptr::null_mut();
         // SAFETY: `out` is a writable slot; `ptr` addresses a live blob whose reference
@@ -164,7 +164,7 @@ impl<'r> Blob<'r> {
     /// [`Object::lookup`]: crate::libgit2::src::libgit2::object::Object::lookup
     /// [`ErrorCode::NotFound`]: crate::libgit2::src::util::errors::ErrorCode::NotFound
     ///
-    /// Wraps: `git_blob_lookup`
+    /// Wraps `fn::git_blob_lookup`
     ///
     /// # Errors
     ///
@@ -182,6 +182,7 @@ impl<'r> Blob<'r> {
     /// # Panics
     ///
     /// Panics, with `a lookup succeeded without a blob`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_blob_lookup")]
     pub fn lookup(repo: RepositoryRef<'r>, id: OidRef<'_>) -> Result<BlobArc<'r>, RepositoryError> {
         id_fits(repo, id)?;
         let mut out = ptr::null_mut();
@@ -213,7 +214,7 @@ impl<'r> Blob<'r> {
     /// [`ErrorCode::Ambiguous`]: crate::libgit2::src::util::errors::ErrorCode::Ambiguous
     /// [`ErrorCode::NotFound`]: crate::libgit2::src::util::errors::ErrorCode::NotFound
     ///
-    /// Wraps: `git_blob_lookup_prefix`
+    /// Wraps `fn::git_blob_lookup_prefix`
     ///
     /// # Errors
     ///
@@ -225,6 +226,7 @@ impl<'r> Blob<'r> {
     /// # Panics
     ///
     /// Panics, with `a lookup succeeded without a blob`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_blob_lookup_prefix")]
     pub fn lookup_prefix(
         repo: RepositoryRef<'r>,
         id: OidRef<'_>,
@@ -273,11 +275,12 @@ impl<'a, 'r> CommitRef<'a, 'r> {
     /// let _ = commit_id.raw_kind();
     /// ```
     ///
-    /// Wraps: `git_commit_id`
+    /// Wraps `fn::git_commit_id`
     ///
     /// # Panics
     ///
     /// Panics, with `a live commit has an id`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_commit_id")]
     #[must_use]
     pub fn id(&self) -> OidRef<'a> {
         // SAFETY: the handle addresses a live commit for `'a`; libgit2 only reads it, and
@@ -307,11 +310,12 @@ impl<'a, 'r> CommitRef<'a, 'r> {
     /// let _ = owner.path();
     /// ```
     ///
-    /// Wraps: `git_commit_owner`
+    /// Wraps `fn::git_commit_owner`
     ///
     /// # Panics
     ///
     /// Panics, with `a commit always has a repository`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_commit_owner")]
     #[must_use]
     pub fn owner(&self) -> RepositoryRef<'r> {
         // SAFETY: the handle addresses a live commit for `'a`, which libgit2 only reads.
@@ -334,10 +338,6 @@ impl<'a, 'r> CommitRef<'a, 'r> {
 /// increments the same count and hands back the same pointer, so a copy is the same
 /// commit, of the same repository, for the same `'r`. Neither can fail, and neither
 /// allocates.
-///
-/// Wraps: `git_commit_free`
-/// Wraps: `git_commit_dup`
-/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CommitFree;
 
@@ -346,6 +346,8 @@ pub struct CommitFree;
 // the commit outlives the call through that reference, and is freed only once the
 // count, which the cache's reference is part of, reaches zero.
 unsafe impl<'r> CDrop<Commit<'r>> for CommitFree {
+    /// Wraps `fn::git_commit_free`
+    #[doc(alias = "git_commit_free")]
     unsafe fn c_drop(&self, ptr: NonNull<Commit<'r>>) {
         // SAFETY: per `c_drop`'s contract, `ptr` addresses a live commit of which the
         // caller gives up one reference; `Commit` is transparent over `git_commit`.
@@ -359,6 +361,8 @@ unsafe impl<'r> CDrop<Commit<'r>> for CommitFree {
 // fails. `c_is_sole_owner` keeps its `false` default: the repository's cache counts a
 // reference no owner sees, and a later lookup may take another.
 unsafe impl<'r> CRefClone<Commit<'r>> for CommitFree {
+    /// Wraps `fn::git_commit_dup`
+    #[doc(alias = "git_commit_dup")]
     unsafe fn c_up_ref(&self, ptr: NonNull<Commit<'r>>) -> bool {
         let mut out = ptr::null_mut();
         // SAFETY: `out` is a writable slot; `ptr` addresses a live commit whose
@@ -391,7 +395,7 @@ impl<'r> Commit<'r> {
     /// drop(commit);
     /// ```
     ///
-    /// Wraps: `git_commit_lookup`
+    /// Wraps `fn::git_commit_lookup`
     ///
     /// # Errors
     ///
@@ -412,6 +416,7 @@ impl<'r> Commit<'r> {
     /// # Panics
     ///
     /// Panics, with `a lookup succeeded without a commit`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_commit_lookup")]
     pub fn lookup(
         repo: RepositoryRef<'r>,
         id: OidRef<'_>,
@@ -442,7 +447,7 @@ impl<'r> Commit<'r> {
     /// candidate, whatever its type: the prefix must name exactly one, which must then
     /// be a commit.
     ///
-    /// Wraps: `git_commit_lookup_prefix`
+    /// Wraps `fn::git_commit_lookup_prefix`
     ///
     /// # Errors
     ///
@@ -457,6 +462,7 @@ impl<'r> Commit<'r> {
     /// # Panics
     ///
     /// Panics, with `a lookup succeeded without a commit`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_commit_lookup_prefix")]
     pub fn lookup_prefix(
         repo: RepositoryRef<'r>,
         id: OidRef<'_>,
@@ -516,8 +522,6 @@ impl<'r> TagRef<'_, 'r> {
     /// Another counted reference to the tag, as `git_tag_dup` takes one: the same tag,
     /// now also kept alive by the result, which may outlive this borrow but not the
     /// repository.
-    ///
-    /// Wraps: `git_tag_dup`
     #[expect(
         clippy::missing_panics_doc,
         reason = "cannot panic: a handle is never NULL"
@@ -542,10 +546,6 @@ impl<'r> TagRef<'_, 'r> {
 /// the object's atomic count and, at zero, frees the tag with its name, tagger and
 /// message (`git_tag__free`), never reading its repository; the copy increments the same
 /// count and hands back the same pointer. Neither can fail, and neither allocates.
-///
-/// Wraps: `git_tag_free`
-/// Wraps: `git_tag_dup`
-/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TagFree;
 
@@ -554,6 +554,8 @@ pub struct TagFree;
 // reference, and is freed only once the count, which the cache's reference is part of,
 // reaches zero.
 unsafe impl<'r> CDrop<Tag<'r>> for TagFree {
+    /// Wraps `fn::git_tag_free`
+    #[doc(alias = "git_tag_free")]
     unsafe fn c_drop(&self, ptr: NonNull<Tag<'r>>) {
         // SAFETY: per `c_drop`'s contract, `ptr` addresses a live tag of which the
         // caller gives up one reference; `Tag` is transparent over `git_tag`.
@@ -567,6 +569,8 @@ unsafe impl<'r> CDrop<Tag<'r>> for TagFree {
 // `c_is_sole_owner` keeps its `false` default: the repository's cache counts a reference
 // no owner sees, and a later lookup may take another.
 unsafe impl<'r> CRefClone<Tag<'r>> for TagFree {
+    /// Wraps `fn::git_tag_dup`
+    #[doc(alias = "git_tag_dup")]
     unsafe fn c_up_ref(&self, ptr: NonNull<Tag<'r>>) -> bool {
         let mut out = ptr::null_mut();
         // SAFETY: `out` is a writable slot; `ptr` addresses a live tag whose reference
@@ -585,7 +589,7 @@ impl<'r> Tag<'r> {
     /// so that every later lookup of the id, as a tag or as an object, yields the same
     /// tag while the cache keeps it.
     ///
-    /// Wraps: `git_tag_lookup`
+    /// Wraps `fn::git_tag_lookup`
     ///
     /// # Errors
     ///
@@ -600,6 +604,7 @@ impl<'r> Tag<'r> {
     /// # Panics
     ///
     /// Panics, with `a lookup succeeded without a tag`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_tag_lookup")]
     pub fn lookup(repo: RepositoryRef<'r>, id: OidRef<'_>) -> Result<TagArc<'r>, RepositoryError> {
         id_fits(repo, id)?;
         let mut out = ptr::null_mut();
@@ -628,7 +633,7 @@ impl<'r> Tag<'r> {
     /// with type tag does, and refuses an `id` of another type than `repo`'s as it does,
     /// whatever `len`.
     ///
-    /// Wraps: `git_tag_lookup_prefix`
+    /// Wraps `fn::git_tag_lookup_prefix`
     ///
     /// # Errors
     ///
@@ -639,6 +644,7 @@ impl<'r> Tag<'r> {
     /// # Panics
     ///
     /// Panics, with `a lookup succeeded without a tag`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_tag_lookup_prefix")]
     pub fn lookup_prefix(
         repo: RepositoryRef<'r>,
         id: OidRef<'_>,
@@ -673,11 +679,12 @@ impl<'a, 'r> TagRef<'a, 'r> {
     /// the full id a prefix found. Borrowed for as long as the handle: libgit2 keeps it
     /// in the tag, which writes it once, when it is parsed.
     ///
-    /// Wraps: `git_tag_id`
+    /// Wraps `fn::git_tag_id`
     ///
     /// # Panics
     ///
     /// Panics, with `a live tag has an id`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_tag_id")]
     #[must_use]
     pub fn id(&self) -> OidRef<'a> {
         // SAFETY: the handle addresses a live tag for `'a`; `git_tag_id` is
@@ -706,11 +713,12 @@ impl<'a, 'r> TagRef<'a, 'r> {
     /// let _ = owner.path();
     /// ```
     ///
-    /// Wraps: `git_tag_owner`
+    /// Wraps `fn::git_tag_owner`
     ///
     /// # Panics
     ///
     /// Panics, with `a tag always has a repository`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_tag_owner")]
     #[must_use]
     pub fn owner(&self) -> RepositoryRef<'r> {
         // SAFETY: the handle addresses a live tag for `'a`; `git_tag_owner` is
@@ -730,8 +738,6 @@ impl<'r> TreeRef<'_, 'r> {
     /// Another counted reference to the tree, as `git_tree_dup` takes one: the same
     /// tree, now also kept alive by the result, which may outlive this borrow but not
     /// the repository.
-    ///
-    /// Wraps: `git_tree_dup`
     #[expect(
         clippy::missing_panics_doc,
         reason = "cannot panic: a handle is never NULL"
@@ -757,10 +763,6 @@ impl<'r> TreeRef<'_, 'r> {
 /// reference to the raw object data (`git_tree__free`), never reading its repository;
 /// the copy increments the same count and hands back the same pointer. Neither can
 /// fail, and neither allocates.
-///
-/// Wraps: `git_tree_free`
-/// Wraps: `git_tree_dup`
-/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TreeFree;
 
@@ -769,6 +771,8 @@ pub struct TreeFree;
 // that reference, and is freed only once the count, which the cache's reference is part
 // of, reaches zero.
 unsafe impl<'r> CDrop<Tree<'r>> for TreeFree {
+    /// Wraps `fn::git_tree_free`
+    #[doc(alias = "git_tree_free")]
     unsafe fn c_drop(&self, ptr: NonNull<Tree<'r>>) {
         // SAFETY: per `c_drop`'s contract, `ptr` addresses a live tree of which the
         // caller gives up one reference; `Tree` is transparent over `git_tree`.
@@ -782,6 +786,8 @@ unsafe impl<'r> CDrop<Tree<'r>> for TreeFree {
 // `c_is_sole_owner` keeps its `false` default: the repository's cache counts a reference
 // no owner sees, and a later lookup may take another.
 unsafe impl<'r> CRefClone<Tree<'r>> for TreeFree {
+    /// Wraps `fn::git_tree_dup`
+    #[doc(alias = "git_tree_dup")]
     unsafe fn c_up_ref(&self, ptr: NonNull<Tree<'r>>) -> bool {
         let mut out = ptr::null_mut();
         // SAFETY: `out` is a writable slot; `ptr` addresses a live tree whose reference
@@ -800,7 +806,7 @@ impl<'r> Tree<'r> {
     /// cache's size limit, caches it, so that every later lookup of the id, as a tree
     /// or as an object, yields the same tree while the cache keeps it.
     ///
-    /// Wraps: `git_tree_lookup`
+    /// Wraps `fn::git_tree_lookup`
     ///
     /// # Errors
     ///
@@ -815,6 +821,7 @@ impl<'r> Tree<'r> {
     /// # Panics
     ///
     /// Panics, with `a lookup succeeded without a tree`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_tree_lookup")]
     pub fn lookup(repo: RepositoryRef<'r>, id: OidRef<'_>) -> Result<TreeArc<'r>, RepositoryError> {
         id_fits(repo, id)?;
         let mut out = ptr::null_mut();
@@ -844,7 +851,7 @@ impl<'r> Tree<'r> {
     /// with type tree does, and refuses an `id` of another type than `repo`'s as it
     /// does, whatever `len`.
     ///
-    /// Wraps: `git_tree_lookup_prefix`
+    /// Wraps `fn::git_tree_lookup_prefix`
     ///
     /// # Errors
     ///
@@ -855,6 +862,7 @@ impl<'r> Tree<'r> {
     /// # Panics
     ///
     /// Panics, with `a lookup succeeded without a tree`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_tree_lookup_prefix")]
     pub fn lookup_prefix(
         repo: RepositoryRef<'r>,
         id: OidRef<'_>,
@@ -890,11 +898,12 @@ impl<'a, 'r> TreeRef<'a, 'r> {
     /// full id a prefix found. Borrowed for as long as the handle: libgit2 keeps it in
     /// the tree, which writes it once, when it is parsed.
     ///
-    /// Wraps: `git_tree_id`
+    /// Wraps `fn::git_tree_id`
     ///
     /// # Panics
     ///
     /// Panics, with `a live tree has an id`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_tree_id")]
     #[must_use]
     pub fn id(&self) -> OidRef<'a> {
         // SAFETY: the handle addresses a live tree for `'a`; libgit2 only reads it, and
@@ -924,11 +933,12 @@ impl<'a, 'r> TreeRef<'a, 'r> {
     /// let _ = owner.path();
     /// ```
     ///
-    /// Wraps: `git_tree_owner`
+    /// Wraps `fn::git_tree_owner`
     ///
     /// # Panics
     ///
     /// Panics, with `a tree always has a repository`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_tree_owner")]
     #[must_use]
     pub fn owner(&self) -> RepositoryRef<'r> {
         // SAFETY: the handle addresses a live tree for `'a`, which libgit2 only reads.
