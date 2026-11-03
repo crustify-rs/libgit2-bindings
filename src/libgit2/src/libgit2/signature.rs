@@ -195,7 +195,8 @@ define_ctype!(
     /// libgit2 leaves a signature without a timezone). Read and write its fields
     /// through [`as_ref`](Self::as_ref) / [`as_mut`](Self::as_mut).
     ///
-    /// Wraps: git_time
+    /// Wraps `ty::git_time`
+    #[doc(alias = "git_time")]
     #[derive(Clone, Copy)]
     Time,
     TimeRef,
@@ -234,8 +235,6 @@ impl Time {
     /// otherwise. Any value is accepted, as libgit2 accepts it; see the [module
     /// docs](self) for what libgit2 then writes of a time outside `u32` seconds or at
     /// `i32::MIN` minutes.
-    ///
-    /// Handwritten
     #[must_use]
     pub fn new(seconds: i64, offset_minutes: i32) -> Time {
         let mut time = Time::zeroed();
@@ -264,7 +263,8 @@ impl From<Time> for ffi::git_time {
 impl TimeRef<'_> {
     /// Seconds since the epoch, 1970-01-01T00:00:00Z; negative before it.
     ///
-    /// Field: `git_time.time`
+    /// Wraps `fld::git_time.time`
+    #[doc(alias = "git_time.time")]
     #[must_use]
     pub fn seconds(&self) -> i64 {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -278,7 +278,8 @@ impl TimeRef<'_> {
     /// The timezone's offset from UTC in minutes, negative west of it. libgit2 parses
     /// at most 14 hours and 59 minutes either way, but stores whatever it is given.
     ///
-    /// Field: `git_time.offset`
+    /// Wraps `fld::git_time.offset`
+    #[doc(alias = "git_time.offset")]
     #[must_use]
     pub fn offset_minutes(&self) -> i32 {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -294,7 +295,8 @@ impl TimeRef<'_> {
     /// timezone, or whatever character a malformed one started with. `b'-'` with an
     /// offset of 0 is git's questionable `-0000`.
     ///
-    /// Field: `git_time.sign`
+    /// Wraps `fld::git_time.sign`
+    #[doc(alias = "git_time.sign")]
     #[must_use]
     pub fn sign(&self) -> u8 {
         // SAFETY: the shared handle's pointer addresses a live `git_time`; the projection forms no
@@ -318,7 +320,8 @@ impl TimeRef<'_> {
 impl TimeMut<'_> {
     /// Replaces the seconds since the epoch.
     ///
-    /// Field: `git_time.time`
+    /// Wraps `fld::git_time.time`
+    #[doc(alias = "git_time.time")]
     pub fn set_seconds(&mut self, seconds: i64) {
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
         // forms no reference to it.
@@ -332,7 +335,8 @@ impl TimeMut<'_> {
     /// Any value is accepted; `i32::MIN` is one libgit2 cannot write (see the [module
     /// docs](self)).
     ///
-    /// Field: `git_time.offset`
+    /// Wraps `fld::git_time.offset`
+    #[doc(alias = "git_time.offset")]
     pub fn set_offset_minutes(&mut self, offset_minutes: i32) {
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
         // forms no reference to it.
@@ -344,7 +348,8 @@ impl TimeMut<'_> {
 
     /// Replaces the sign character. Any byte is accepted, as libgit2 accepts it.
     ///
-    /// Field: `git_time.sign`
+    /// Wraps `fld::git_time.sign`
+    #[doc(alias = "git_time.sign")]
     pub fn set_sign(&mut self, sign: u8) {
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
         // forms no reference to it.
@@ -435,7 +440,8 @@ define_ctype!(
     /// let _ = <Signature as ffibox::CZeroable>::zeroed();
     /// ```
     ///
-    /// Wraps: git_signature
+    /// Wraps `ty::git_signature`
+    #[doc(alias = "git_signature")]
     Signature,
     SignatureRef,
     SignatureMut,
@@ -474,10 +480,6 @@ unsafe impl Sync for SignatureMut<'_> {}
 /// The policy refuses such a copy instead, so [`try_clone`](CBox::try_clone) gives
 /// `None` and `Clone` aborts, as it does when the copy runs out of memory;
 /// [`SignatureRef::to_signature`] reports it as an error.
-///
-/// Wraps: `git_signature_free`
-/// Wraps: `git_signature_dup`
-/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SignatureFree;
 
@@ -485,9 +487,21 @@ pub struct SignatureFree;
 /// through `git_signature_dup`.
 pub type SignatureBox = CBox<Signature, SignatureFree>;
 
-impl_cdrop!(SignatureFree, Signature, ffi::git_signature_free);
+impl_cdrop!(
+    /// Wraps `fn::git_signature_free`
+    #[doc(alias = "git_signature_free")]
+    SignatureFree,
+    Signature,
+    ffi::git_signature_free
+);
 
-impl_cdupclone!(SignatureFree, Signature, signature_dup);
+impl_cdupclone!(
+    /// Wraps `fn::git_signature_dup`
+    #[doc(alias = "git_signature_dup")]
+    SignatureFree,
+    Signature,
+    signature_dup
+);
 
 /// `git_signature_dup` in `impl_cdupclone!`'s shape: a fresh copy, or NULL when the
 /// copy fails, libgit2 cannot be initialised, or `sig` lacks its name or its email.
@@ -543,7 +557,7 @@ impl Signature {
     /// A signature of `name` and `email` at `seconds` since the epoch, in the zone
     /// `offset_minutes` east of UTC, signed as [`Time::new`] signs it.
     ///
-    /// Wraps: `git_signature_new`
+    /// Wraps `fn::git_signature_new`
     ///
     /// # Errors
     ///
@@ -555,6 +569,7 @@ impl Signature {
     ///
     /// When libgit2 runs out of memory copying a string, it leaks the half-built
     /// signature before reporting the error.
+    #[doc(alias = "git_signature_new")]
     pub fn new(
         name: &CStr,
         email: &CStr,
@@ -591,12 +606,13 @@ impl Signature {
     /// its own. `ThreadSanitizer` cannot see that lock, and reports them as a race on
     /// glibc's copy of `TZ`.
     ///
-    /// Wraps: `git_signature_now`
+    /// Wraps `fn::git_signature_now`
     ///
     /// # Errors
     ///
     /// Fails as [`new`](Self::new) does, and with libgit2's error when the system clock or the
     /// local timezone cannot be read.
+    #[doc(alias = "git_signature_now")]
     pub fn now(name: &CStr, email: &CStr) -> Result<SignatureBox, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
@@ -618,7 +634,7 @@ impl Signature {
     /// brackets or be empty. A missing time leaves the epoch, and the zone is kept as libgit2 reads
     /// it, a malformed one included (see [`Time`]).
     ///
-    /// Wraps: `git_signature_from_buffer`
+    /// Wraps `fn::git_signature_from_buffer`
     ///
     /// # Errors
     ///
@@ -628,6 +644,7 @@ impl Signature {
     /// libgit2 reports success when it runs out of memory copying the name or the
     /// email, leaving it NULL; that signature is refused here, with the out-of-memory
     /// error, so every signature this builds has both.
+    #[doc(alias = "git_signature_from_buffer")]
     pub fn parse(buf: &CStr) -> Result<SignatureBox, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
@@ -648,7 +665,8 @@ impl<'a> SignatureRef<'a> {
     /// libgit2 ran out of memory copying it while it parsed the signature (a commit's,
     /// say); every signature this crate builds has one.
     ///
-    /// Field: `git_signature.name`
+    /// Wraps `fld::git_signature.name`
+    #[doc(alias = "git_signature.name")]
     #[must_use]
     pub fn name(&self) -> Option<&'a CStr> {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -665,7 +683,8 @@ impl<'a> SignatureRef<'a> {
     /// The email, borrowed in place for as long as the signature is; `None` only where
     /// libgit2 ran out of memory copying it, as for [`name`](Self::name).
     ///
-    /// Field: `git_signature.email`
+    /// Wraps `fld::git_signature.email`
+    #[doc(alias = "git_signature.email")]
     #[must_use]
     pub fn email(&self) -> Option<&'a CStr> {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -679,7 +698,8 @@ impl<'a> SignatureRef<'a> {
 
     /// When the action happened, borrowed in place for as long as the signature is.
     ///
-    /// Field: `git_signature.when`
+    /// Wraps `fld::git_signature.when`
+    #[doc(alias = "git_signature.when")]
     #[must_use]
     #[expect(
         clippy::missing_panics_doc,
@@ -696,8 +716,6 @@ impl<'a> SignatureRef<'a> {
     /// A copy of the signature in libgit2's allocator, its strings copied, as
     /// `git_signature_dup` makes one. [`SignatureView`]s and the signatures libgit2's
     /// objects hold become owned this way; an owner also copies with `Clone`.
-    ///
-    /// Wraps: `git_signature_dup`
     ///
     /// # Errors
     ///
@@ -733,7 +751,8 @@ impl SignatureMut<'_> {
     /// written into an object git cannot parse back. [`Signature::new`] refuses those
     /// brackets.
     ///
-    /// Field: `git_signature.name`
+    /// Wraps `fld::git_signature.name`
+    #[doc(alias = "git_signature.name")]
     pub fn set_name(&mut self, name: OdbDataStr) {
         drop(self.replace_name(name));
     }
@@ -741,7 +760,8 @@ impl SignatureMut<'_> {
     /// Replaces the name, handing back the one held before (`None` where libgit2 had
     /// lost it, as [`SignatureRef::name`] reads it).
     ///
-    /// Field: `git_signature.name`
+    /// Wraps `fld::git_signature.name`
+    #[doc(alias = "git_signature.name")]
     pub fn replace_name(&mut self, name: OdbDataStr) -> Option<OdbDataStr> {
         // SAFETY: a projection, without a read, of a live `git_signature`'s field
         // through the exclusive handle's pointer.
@@ -754,7 +774,8 @@ impl SignatureMut<'_> {
     /// for [`set_name`](Self::set_name); an email holding `>` or a newline breaks the
     /// objects libgit2 writes it into.
     ///
-    /// Field: `git_signature.email`
+    /// Wraps `fld::git_signature.email`
+    #[doc(alias = "git_signature.email")]
     pub fn set_email(&mut self, email: OdbDataStr) {
         drop(self.replace_email(email));
     }
@@ -762,7 +783,8 @@ impl SignatureMut<'_> {
     /// Replaces the email, handing back the one held before (`None` where libgit2 had
     /// lost it).
     ///
-    /// Field: `git_signature.email`
+    /// Wraps `fld::git_signature.email`
+    #[doc(alias = "git_signature.email")]
     pub fn replace_email(&mut self, email: OdbDataStr) -> Option<OdbDataStr> {
         // SAFETY: as in `replace_name`.
         let field = unsafe { addr_of_mut!((*self.as_mut_ptr()).email) };
@@ -772,7 +794,8 @@ impl SignatureMut<'_> {
 
     /// When the action happened, for its setters, borrowed in place.
     ///
-    /// Field: `git_signature.when`
+    /// Wraps `fld::git_signature.when`
+    #[doc(alias = "git_signature.when")]
     #[expect(
         clippy::missing_panics_doc,
         reason = "cannot panic: a field's address is not NULL"
@@ -788,7 +811,8 @@ impl SignatureMut<'_> {
 
     /// Replaces when the action happened.
     ///
-    /// Field: `git_signature.when`
+    /// Wraps `fld::git_signature.when`
+    #[doc(alias = "git_signature.when")]
     pub fn set_when(&mut self, when: Time) {
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
         // forms no reference to it.
@@ -862,9 +886,6 @@ impl Eq for SignatureRef<'_> {}
 /// let mut view = SignatureView::new(c"A", c"a@b", Time::new(0, 0));
 /// let _ = view.as_mut();
 /// ```
-///
-/// Wraps: `git_signature`
-/// Handwritten
 pub struct SignatureView<'a> {
     /// `name` and `email` address the borrowed strings.
     signature: Signature,
@@ -931,7 +952,7 @@ impl Signature {
     /// Concurrent calls are sound, and race as [`Signature::now`] does under
     /// `ThreadSanitizer`, on glibc's copy of `TZ`.
     ///
-    /// Wraps: `git_signature_default`
+    /// Wraps `fn::git_signature_default`
     ///
     /// # Errors
     ///
@@ -940,6 +961,7 @@ impl Signature {
     /// set, with libgit2's error when the configuration cannot be read, and as
     /// [`Signature::now`] fails for a value it refuses (an empty one, or one holding an
     /// angle bracket).
+    #[doc(alias = "git_signature_default")]
     pub fn default(repo: RepositoryRef<'_>) -> Result<SignatureBox, RepositoryError> {
         let mut out = ptr::null_mut();
         // SAFETY: `out` is a writable slot, set only on success; `repo` is a live
@@ -969,13 +991,14 @@ impl Signature {
     /// Concurrent calls are sound, and race as [`Signature::now`] does under
     /// `ThreadSanitizer`, on glibc's copy of `TZ`.
     ///
-    /// Wraps: `git_signature_default_from_env`
+    /// Wraps `fn::git_signature_default_from_env`
     ///
     /// # Errors
     ///
     /// Fails as [`default_author_from_env`](Self::default_author_from_env) fails for the
     /// author, else as [`default_committer_from_env`](Self::default_committer_from_env)
     /// fails for the committer.
+    #[doc(alias = "git_signature_default_from_env")]
     pub fn default_from_env(
         repo: RepositoryRef<'_>,
     ) -> Result<(SignatureBox, SignatureBox), RepositoryError> {
@@ -1011,7 +1034,7 @@ impl Signature {
     /// The author git would record in `repo`, from the environment first:
     /// [`default_from_env`](Self::default_from_env)'s author, built alone.
     ///
-    /// Wraps: `git_signature_default_from_env`
+    /// Wraps `fn::git_signature_default_from_env`
     ///
     /// # Errors
     ///
@@ -1022,6 +1045,7 @@ impl Signature {
     /// value it refuses; and with `-1` when `GIT_AUTHOR_DATE` does not parse, for which
     /// libgit2 sets no error of its own: the error is whatever libgit2 left last, such
     /// as a configuration file it did not find.
+    #[doc(alias = "git_signature_default_from_env")]
     pub fn default_author_from_env(
         repo: RepositoryRef<'_>,
     ) -> Result<SignatureBox, RepositoryError> {
@@ -1046,12 +1070,13 @@ impl Signature {
     /// [`default_author_from_env`](Self::default_author_from_env) does, from the
     /// `GIT_COMMITTER_*` variables.
     ///
-    /// Wraps: `git_signature_default_from_env`
+    /// Wraps `fn::git_signature_default_from_env`
     ///
     /// # Errors
     ///
     /// Fails as [`default_author_from_env`](Self::default_author_from_env) does, from the
     /// `GIT_COMMITTER_*` variables.
+    #[doc(alias = "git_signature_default_from_env")]
     pub fn default_committer_from_env(
         repo: RepositoryRef<'_>,
     ) -> Result<SignatureBox, RepositoryError> {
