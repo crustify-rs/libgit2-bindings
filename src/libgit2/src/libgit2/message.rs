@@ -28,12 +28,13 @@ use crate::libgit2::src::util::errors::{ErrorBuf, last, runtime_pinned};
 /// assert_eq!(kept.as_ref().as_bytes(), b"subject\n# comment\n");
 /// ```
 ///
-/// Wraps: `git_message_prettify`
+/// Wraps `fn::git_message_prettify`
 ///
 /// # Errors
 ///
 /// Fails, with libgit2's error, when the result cannot be allocated or libgit2 cannot be
 /// initialised.
+#[doc(alias = "git_message_prettify")]
 pub fn prettify(message: &CStr, comment: Option<u8>) -> Result<BufVal, ErrorBuf> {
     if !runtime_pinned() {
         return Err(last());
