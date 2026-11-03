@@ -230,9 +230,9 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/index` | `49` | `0` | review | `15` | `5` | `+738/-79` | `45.75`% / `99.53`% | `$15.85` | `50.35M` | `46m20s` | `$1.06` | `$3.17` |
 | `libgit2/index` | `51` | `0` | review | `3` | `17` | `+203/-8` | `46.57`% / `99.53`% | `$12.82` | `35.96M` | `48m41s` | `$4.27` | `$0.75` |
 | `libgit2/src/libgit2/indexer.c` | `173` | `0` | review | `1` | `7` | `+10/-7` | — | `$3.93` | `10.78M` | `16m22s` | `$3.93` | `$0.56` |
-| `libgit2/src/libgit2/odb.c` | `177` | `0` | review | `4` | `19` | `+64/-8` | — | `$<n>` | `<n>M` | `<n>m<n>s` | `$<n>` | `$<n>` |
+| `libgit2/src/libgit2/odb.c` | `177` | `0` | review | `4` | `19` | `+64/-8` | — | `$1.37` | `4.35M` | `28m33s` | `$0.34` | `$0.07` |
 | **Σ first** |  |  |  | **`101`** | **`171`** | **`+93262/-2059`** | **`45.85`% / `99.54`%** | **`$553.73`** | **`1335.83M`** | — | **`$5.48`** | **`$3.24`** |
-| **Σ review** |  |  |  | **`101`** | **`171`** | **`+9338/-2046`** | **`46.57`% / `99.53`%** | **`$392.97`** | **`623.63M`** | — | **`$4.05`** | **`$2.59`** |
+| **Σ review** |  |  |  | **`101`** | **`171`** | **`+9338/-2046`** | **`46.57`% / `99.53`%** | **`$394.34`** | **`627.98M`** | — | **`$3.90`** | **`$2.31`** |
 
 ### Batches — wrap: tests
 
@@ -540,9 +540,9 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/index` | `49` | `1` | wrap | review | `1` | — | `+303/-147` | `45.57`% / `99.51`% | `$6.50` | `18.04M` | `24m32s` | `$6.50` | — |
 | `libgit2/index` | `51` | `1` | wrap | review | `55` | — | `+442/-9` | `46.58`% / `99.53`% | `$12.37` | `39.58M` | `39m02s` | `$0.22` | — |
 | `libgit2/index` | `53` | `0` | wrap | review | `19` | — | `+190/-21` | `46.64`% / `99.55`% | `$20.10` | `42.35M` | `1h18m28s` | `$1.06` | — |
-| `libgit2/src/libgit2/odb.c` | `177` | `0` | wrap | review | `22` | — | `+23/-2` | — | `$<n>` | `<n>M` | `<n>m<n>s` | `$<n>` | — |
+| `libgit2/src/libgit2/odb.c` | `177` | `0` | wrap | review | `22` | — | `+23/-2` | — | `$7.52` | `23.94M` | `28m33s` | `$0.34` | — |
 | **Σ first** |  |  |  |  | **`411`** | **`7773`** | **`+64211/-2474`** | **`46.66`% / `99.55`%** | **`$391.51`** | **`1206.70M`** | — | **`$0.95`** | **`$0.05`** |
-| **Σ review** |  |  |  |  | **`411`** | — | **`+6709/-1297`** | **`46.64`% / `99.55`%** | **`$312.87`** | **`562.64M`** | — | **`$0.80`** | — |
+| **Σ review** |  |  |  |  | **`411`** | — | **`+6709/-1297`** | **`46.64`% / `99.55`%** | **`$320.39`** | **`586.58M`** | — | **`$0.78`** | — |
 
 ### Batches: tests
 
@@ -1126,7 +1126,7 @@ the ffibox pin drift.
 
 ### `libgit2/src/libgit2/odb.c` wave 177: review of wave 176
 
-Wave 177 batch 0 reviews wave 176's three batches. Its rows are split by item kind. The
+Wave 177 batch 0 reviews wave 176's three batches. Its rows are split by item kind. One reviewer ran for both rows (reviewer run 124, $8.89, 28.30M tokens), so its cost and tokens are split between them by the items each covers (4 types, 22 symbols), and each row gives the run's whole wall. The
 `Types` rows (batches 0 and 1: 4 types, 19 fields) count the `ub_safe` report, which covers
 `OdbRef::open_read_stream`, bound with `git_odb_stream`, and two `misc` ones: the
 `git_odb_open_rstream` ownership note and the `OdbExpandId` docs. The `Symbols` rows (batch 2:

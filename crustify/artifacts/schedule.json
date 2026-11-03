@@ -12314,7 +12314,7 @@
       "module": "src/libgit2/odb.c",
       "foundational": false,
       "reviews": 176,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
           176
@@ -12331,13 +12331,16 @@
         {
           "index": 0,
           "kind": "review",
-          "status": "todo",
+          "status": "done",
           "reviews": [
             0,
             1,
             2
           ],
-          "commits": []
+          "commits": [
+            "a45693dc7b8ed8df1c19cf09338fdbcef0a21bf6",
+            "9c1b8793147161568e8ce5728254947882020886"
+          ]
         }
       ]
     },
