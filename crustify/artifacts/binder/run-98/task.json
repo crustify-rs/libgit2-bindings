@@ -1,0 +1,38 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_odb_backend",
+      "defined_in": "include/git2/sys/odb_backend.h",
+      "kind": "type",
+      "field_anchors": [
+        "read",
+        "exists",
+        "foreach",
+        "read_header",
+        "write",
+        "version",
+        "free",
+        "odb",
+        "freshen",
+        "writemidx",
+        "writepack",
+        "refresh",
+        "exists_prefix",
+        "readstream",
+        "writestream",
+        "read_prefix"
+      ],
+      "home": "src/libgit2/src/libgit2/odb.rs"
+    }
+  ],
+  "wave": 180,
+  "batch": 0,
+  "link_unit": "libgit2",
+  "module": "src/libgit2/odb.c",
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-180",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api",
+  "instructions": "instructions.md"
+}

@@ -12422,7 +12422,7 @@
       "link_unit": "libgit2",
       "module": "src/libgit2/odb.c",
       "foundational": false,
-      "status": "todo",
+      "status": "wip",
       "depends_on": {
         "scheduled": [
           89,
@@ -12444,7 +12444,7 @@
         {
           "index": 0,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_odb_backend",
@@ -12471,7 +12471,9 @@
               "home": "src/libgit2/src/libgit2/odb.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "9fe83bce60830288bb2f8157a6c7962abb1927f1"
+          ]
         },
         {
           "index": 1,
