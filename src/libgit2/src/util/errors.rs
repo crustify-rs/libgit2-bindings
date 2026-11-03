@@ -138,8 +138,8 @@ c_enum! {
     /// value, or a negative one the header does not name, gives `None` from
     /// [`from_raw`](Self::from_raw).
     ///
-    /// Wraps: `git_error_code`
-    /// Handwritten
+    /// Wraps `ty::git_error_code`
+    #[doc(alias = "git_error_code")]
     pub enum ErrorCode {
         /// No error occurred; the call was successful.
         Ok = ffi::GIT_OK,
@@ -216,8 +216,6 @@ c_enum! {
 
     /// A return code that this version of libgit2's header does not name: a callback's
     /// own result handed back, or a code of a later header. [`raw`](Self::raw) has it.
-    ///
-    /// Handwritten
     pub struct UnnamedErrorCode("error code");
 }
 
@@ -228,8 +226,8 @@ c_enum! {
     /// `int`, which user code may set to a value the header does not name; such a
     /// value gives `None` from [`from_raw`](Self::from_raw).
     ///
-    /// Wraps: `git_error_t`
-    /// Handwritten
+    /// Wraps `ty::git_error_t`
+    #[doc(alias = "git_error_t")]
     pub enum ErrorClass {
         /// No error.
         None = ffi::GIT_ERROR_NONE.cast_signed(),
@@ -309,8 +307,6 @@ c_enum! {
 
     /// An error class that this version of libgit2's header does not name, which user
     /// code can set through `git_error_set_str`. [`raw`](Self::raw) has it.
-    ///
-    /// Handwritten
     pub struct UnnamedErrorClass("error class");
 }
 
@@ -345,7 +341,8 @@ define_ctype!(
     /// There are no setters: libgit2 publishes the struct read-only and no public
     /// routine takes one. [`ErrorRef::to_error_buf`] copies it.
     ///
-    /// Wraps: git_error
+    /// Wraps `ty::git_error`
+    #[doc(alias = "git_error")]
     Error,
     ErrorRef,
     ErrorMut,
@@ -356,7 +353,8 @@ impl<'a> ErrorRef<'a> {
     /// The error message, borrowed from the error. libgit2 never publishes a NULL
     /// message; one reads as empty.
     ///
-    /// Field: `git_error.message`
+    /// Wraps `fld::git_error.message`
+    #[doc(alias = "git_error.message")]
     #[must_use]
     pub fn message(&self) -> &'a CStr {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -375,7 +373,8 @@ impl<'a> ErrorRef<'a> {
     /// The error's class; `None` for a class the header does not name, which user
     /// code can set through `git_error_set_str` ([`raw_class`](Self::raw_class) has it).
     ///
-    /// Field: `git_error.klass`
+    /// Wraps `fld::git_error.klass`
+    #[doc(alias = "git_error.klass")]
     #[must_use]
     pub fn class(&self) -> Option<ErrorClass> {
         ErrorClass::from_raw(self.raw_class())
@@ -383,7 +382,8 @@ impl<'a> ErrorRef<'a> {
 
     /// The error's class as libgit2 stores it, whether or not the header names it.
     ///
-    /// Field: `git_error.klass`
+    /// Wraps `fld::git_error.klass`
+    #[doc(alias = "git_error.klass")]
     #[must_use]
     pub fn raw_class(&self) -> c_int {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -430,8 +430,6 @@ impl fmt::Debug for ErrorRef<'_> {
 /// libgit2's own copy, `git_error_save`, is internal to libgit2.so, and nothing public
 /// takes a `git_error` back, so the copy needs no C layout. It displays as its message;
 /// libgit2 messages are bytes (paths among them), shown lossily.
-///
-/// Handwritten
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ErrorBuf {
     class: c_int,
@@ -512,11 +510,12 @@ impl std::error::Error for ErrorBuf {}
 /// that static error only when libgit2 cannot be initialised, without calling
 /// libgit2: a failed initialisation can leave the thread state without a key.
 ///
-/// Wraps: `git_error_last`
+/// Wraps `fn::git_error_last`
 ///
 /// # Panics
 ///
 /// Panics, with `git_error_last never returns NULL`, only if libgit2 breaks its contract.
+#[doc(alias = "git_error_last")]
 #[must_use]
 pub fn last() -> ErrorBuf {
     if !runtime_pinned() {
@@ -568,7 +567,8 @@ pub(crate) fn runtime_pinned() -> bool {
 /// Also resets the thread's `errno` to 0, as libgit2 does, unless the thread's error
 /// state cannot be allocated.
 ///
-/// Wraps: `git_error_clear`
+/// Wraps `fn::git_error_clear`
+#[doc(alias = "git_error_clear")]
 pub fn clear() {
     if runtime_pinned() {
         // SAFETY: no arguments; the runtime is pinned, so the thread state is looked up
@@ -601,7 +601,8 @@ pub fn clear() {
 /// libgit2::libgit2::src::util::errors::set(libgit2::ffi::GIT_ERROR_INVALID, c"bad");
 /// ```
 ///
-/// Wraps: `git_error_set`
+/// Wraps `fn::git_error_set`
+#[doc(alias = "git_error_set")]
 pub fn set(class: ErrorClass, message: &CStr) {
     if runtime_pinned() {
         // SAFETY: a `"%s"` format with the one NUL-terminated string argument it
@@ -623,7 +624,8 @@ pub fn set(class: ErrorClass, message: &CStr) {
 /// error is `GIT_ERROR_NOMEMORY`. Once the thread's buffer is out of memory, the
 /// previous error stays, whatever the class (see the module docs).
 ///
-/// Wraps: `git_error_set`
+/// Wraps `fn::git_error_set`
+#[doc(alias = "git_error_set")]
 pub fn set_without_message(class: ErrorClass) {
     if runtime_pinned() {
         // SAFETY: a NULL format, which libgit2 checks before formatting, so no variadic
@@ -637,12 +639,13 @@ pub fn set_without_message(class: ErrorClass) {
 ///
 /// Unlike [`set`], it never consults `errno`, and it reports whether the message was stored.
 ///
-/// Wraps: `git_error_set_str`
+/// Wraps `fn::git_error_set_str`
 ///
 /// # Errors
 ///
 /// On failure the last error is `GIT_ERROR_NOMEMORY`, or the previous one when the thread's buffer
 /// is already out of memory (see the module docs).
+#[doc(alias = "git_error_set_str")]
 pub fn set_str(class: ErrorClass, message: &CStr) -> Result<(), MessageNotStored> {
     if !runtime_pinned() {
         return Err(MessageNotStored);
@@ -661,7 +664,8 @@ pub fn set_str(class: ErrorClass, message: &CStr) -> Result<(), MessageNotStored
 /// Use it to report an allocation failure: unlike [`set_str`] it needs no storage for
 /// the message, beyond the thread's error state on its first use.
 ///
-/// Wraps: `git_error_set_oom`
+/// Wraps `fn::git_error_set_oom`
+#[doc(alias = "git_error_set_oom")]
 pub fn set_oom() {
     if runtime_pinned() {
         // SAFETY: no arguments; the runtime is pinned, so the thread state is looked up
