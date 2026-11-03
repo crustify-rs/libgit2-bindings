@@ -17,12 +17,13 @@ use crate::libgit2::src::libgit2::tree::TreeRef;
 impl<'r> Diff<'r> {
     /// Compare two trees; None denotes the empty tree on either side.
     /// Uses default options. The result borrows only repo, not the input snapshots.
-    /// Wraps: `git_diff_tree_to_tree`
+    /// Wraps `fn::git_diff_tree_to_tree`
     ///
     /// # Errors
     ///
     /// Fails with libgit2's code and error when an object cannot be read from the object database,
     /// or when it runs out of memory.
+    #[doc(alias = "git_diff_tree_to_tree")]
     pub fn tree_to_tree(
         repo: RepositoryRef<'r>,
         old: Option<TreeRef<'_, '_>>,
@@ -48,12 +49,13 @@ impl<'r> Diff<'r> {
 
     /// Compare a tree (None is empty) to an index (None loads the repository index).
     /// Uses default options. The result borrows only repo, not the input snapshots.
-    /// Wraps: `git_diff_tree_to_index`
+    /// Wraps `fn::git_diff_tree_to_index`
     ///
     /// # Errors
     ///
     /// Fails with libgit2's code and error when the repository's index cannot be loaded, an object
     /// cannot be read, or it runs out of memory.
+    #[doc(alias = "git_diff_tree_to_index")]
     pub fn tree_to_index(
         repo: RepositoryRef<'r>,
         old: Option<TreeRef<'_, '_>>,
@@ -79,12 +81,13 @@ impl<'r> Diff<'r> {
 
     /// Compare an index (None loads the repository index) to the working directory.
     /// Uses default options. The result borrows only repo, not the input snapshots.
-    /// Wraps: `git_diff_index_to_workdir`
+    /// Wraps `fn::git_diff_index_to_workdir`
     ///
     /// # Errors
     ///
     /// Fails with libgit2's code and error for a bare repository, when the repository's index
     /// cannot be loaded, a file cannot be read or filtered, or it runs out of memory.
+    #[doc(alias = "git_diff_index_to_workdir")]
     pub fn index_to_workdir(
         repo: RepositoryRef<'r>,
         index: Option<IndexRef<'_>>,
@@ -108,12 +111,13 @@ impl<'r> Diff<'r> {
 
     /// Compare a tree (None is empty) directly to the working directory.
     /// Uses default options. The result borrows only repo, not the input snapshots.
-    /// Wraps: `git_diff_tree_to_workdir`
+    /// Wraps `fn::git_diff_tree_to_workdir`
     ///
     /// # Errors
     ///
     /// Fails with libgit2's code and error for a bare repository, when an object or a file cannot
     /// be read, or when it runs out of memory.
+    #[doc(alias = "git_diff_tree_to_workdir")]
     pub fn tree_to_workdir(
         repo: RepositoryRef<'r>,
         old: Option<TreeRef<'_, '_>>,
@@ -137,12 +141,13 @@ impl<'r> Diff<'r> {
 
     /// Compare a tree to the working directory, accounting for staged changes.
     /// Uses default options. The result borrows only repo, not the input snapshots.
-    /// Wraps: `git_diff_tree_to_workdir_with_index`
+    /// Wraps `fn::git_diff_tree_to_workdir_with_index`
     ///
     /// # Errors
     ///
     /// Fails with libgit2's code and error for a bare repository, when the repository's index
     /// cannot be loaded, an object or a file cannot be read, or it runs out of memory.
+    #[doc(alias = "git_diff_tree_to_workdir_with_index")]
     pub fn tree_to_workdir_with_index(
         repo: RepositoryRef<'r>,
         old: Option<TreeRef<'_, '_>>,
@@ -166,12 +171,13 @@ impl<'r> Diff<'r> {
 
     /// Compare two indices. A repository is required by this C revision.
     /// Uses default options. The result borrows only repo, not the input snapshots.
-    /// Wraps: `git_diff_index_to_index`
+    /// Wraps `fn::git_diff_index_to_index`
     ///
     /// # Errors
     ///
     /// Fails with libgit2's code and error when an object cannot be read, or when it runs out of
     /// memory.
+    #[doc(alias = "git_diff_index_to_index")]
     pub fn index_to_index(
         repo: RepositoryRef<'r>,
         old: IndexRef<'_>,
