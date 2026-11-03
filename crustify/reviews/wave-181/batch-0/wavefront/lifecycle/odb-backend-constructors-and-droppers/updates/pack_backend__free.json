@@ -1,0 +1,25 @@
+{
+ "ptr_args": {
+  "_backend": {
+   "ptr": {
+    "scalar": {
+     "by_val": true
+    },
+    "array": null,
+    "string": false,
+    "owned": true,
+    "borrowed": null,
+    "nullable": true,
+    "mutable": true,
+    "note": "The pack backend's free member: puts every pack and midx pack back to the mwindow registry, frees the midx, both vectors, pack_folder and the container. Also called by git_odb_backend_pack and git_odb_backend_one_pack on failure. Returns early on NULL."
+   }
+  }
+ },
+ "lifetime": {
+  "for": "_backend",
+  "is_dropper": true,
+  "is_disposer": false,
+  "is_cloner": null,
+  "is_constructor": null
+ }
+}

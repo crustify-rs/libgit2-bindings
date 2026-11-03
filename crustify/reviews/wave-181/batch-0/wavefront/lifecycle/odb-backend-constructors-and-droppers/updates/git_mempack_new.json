@@ -1,0 +1,33 @@
+{
+ "ptr_args": {
+  "out": {
+   "ptr": {
+    "scalar": {
+     "by_ref": {
+      "owned": true,
+      "borrowed": null
+     }
+    },
+    "array": null,
+    "string": false,
+    "owned": false,
+    "borrowed": {
+     "lifetime": "arg:out"
+    },
+    "nullable": false,
+    "mutable": true,
+    "note": "Out-slot written only during the call (GIT_ASSERT_ARG rejects NULL); on success it receives a new calloc'd memory_packer_db the caller owns, released through its free member (impl__free) or handed to an odb. It sets no foreach, refresh, writepack or writemidx member."
+   }
+  }
+ },
+ "lifetime": {
+  "for": "out",
+  "is_dropper": false,
+  "is_disposer": false,
+  "is_cloner": null,
+  "is_constructor": {
+   "alloc": true,
+   "init": false
+  }
+ }
+}

@@ -1,0 +1,25 @@
+{
+ "ptr_args": {
+  "_backend": {
+   "ptr": {
+    "scalar": {
+     "by_val": true
+    },
+    "array": null,
+    "string": false,
+    "owned": true,
+    "borrowed": null,
+    "nullable": true,
+    "mutable": true,
+    "note": "The loose backend's free member: git__frees the whole loose_backend container (its objects_dir is inline). Called by odb_free for a backend an odb holds, or by the owner of one none holds. NULL is a git__free no-op."
+   }
+  }
+ },
+ "lifetime": {
+  "for": "_backend",
+  "is_dropper": true,
+  "is_disposer": false,
+  "is_cloner": null,
+  "is_constructor": null
+ }
+}

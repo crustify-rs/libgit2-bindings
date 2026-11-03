@@ -1,0 +1,33 @@
+{
+ "ptr_args": {
+  "backend_out": {
+   "ptr": {
+    "scalar": {
+     "by_ref": {
+      "owned": true,
+      "borrowed": null
+     }
+    },
+    "array": null,
+    "string": false,
+    "owned": false,
+    "borrowed": {
+     "lifetime": "arg:backend_out"
+    },
+    "nullable": false,
+    "mutable": true,
+    "note": "Out-slot written only during the call, not checked for NULL; on success it receives a new single-pack pack_backend the caller owns, released through its free member (pack_backend__free). Left untouched on failure."
+   }
+  }
+ },
+ "lifetime": {
+  "for": "backend_out",
+  "is_dropper": false,
+  "is_disposer": false,
+  "is_cloner": null,
+  "is_constructor": {
+   "alloc": true,
+   "init": false
+  }
+ }
+}

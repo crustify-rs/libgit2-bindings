@@ -1,0 +1,11 @@
+[package]
+name = "odb-stream-backend-invariant-unstated"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+ffibox = { path = "/opt/venv/share/ffibox" }
+libgit2 = { path = "../../../../../.." }
