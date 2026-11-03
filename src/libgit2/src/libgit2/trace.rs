@@ -28,8 +28,8 @@ use crate::ffi;
 /// lower level, so `configured >= level` decides whether a message is reported, as
 /// libgit2 decides it.
 ///
-/// Wraps: `git_trace_level_t`
-/// Handwritten
+/// Wraps `ty::git_trace_level_t`
+#[doc(alias = "git_trace_level_t")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u32)]
 #[non_exhaustive]
@@ -90,8 +90,6 @@ impl From<TraceLevel> for ffi::git_trace_level_t {
 
 /// A trace level that this version of libgit2's header does not name; [`raw`](Self::raw)
 /// has it.
-///
-/// Handwritten
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct UnnamedTraceLevel(ffi::git_trace_level_t);
 
@@ -138,8 +136,6 @@ pub type TraceFn = unsafe extern "C" fn(level: ffi::git_trace_level_t, msg: *con
 /// [`trace`](Self::trace) is an associated function, and what it keeps lives in
 /// `static`s or thread-locals, which Rust already makes safe to reach from every
 /// thread libgit2 calls it on, concurrently.
-///
-/// Handwritten
 pub trait Tracer {
     /// Receives one message, reported at `level`.
     ///
@@ -205,8 +201,8 @@ pub trait Tracer {
 /// let _ = TraceCallback(c_tracer);
 /// ```
 ///
-/// Wraps: `git_trace_cb`
-/// Handwritten
+/// Wraps `ty::git_trace_cb`
+#[doc(alias = "git_trace_cb")]
 #[derive(Clone, Copy)]
 pub struct TraceCallback(TraceFn);
 
@@ -312,7 +308,8 @@ unsafe extern "C" fn trace_with<T: Tracer>(level: ffi::git_trace_level_t, msg: *
 /// synchronisation, the level first and the callback twice. The calling thread
 /// itself may be inside libgit2, in a traced call or in `callback`.
 ///
-/// Wraps: `git_trace_set`
+/// Wraps `fn::git_trace_set`
+#[doc(alias = "git_trace_set")]
 pub unsafe fn set(level: TraceLevel, callback: TraceCallback) {
     // SAFETY: a named level with a callback, which `git_trace_set` accepts without
     // touching the error state, so before `git_libgit2_init` too; `callback` is safe
@@ -332,7 +329,8 @@ pub unsafe fn set(level: TraceLevel, callback: TraceCallback) {
 /// callback as set before its check and as NULL at the call (libgit2 reads it
 /// twice), and call NULL.
 ///
-/// Wraps: `git_trace_set`
+/// Wraps `fn::git_trace_set`
+#[doc(alias = "git_trace_set")]
 pub unsafe fn clear() {
     // SAFETY: `GIT_TRACE_NONE` without a callback, which `git_trace_set` accepts
     // without touching the error state. The caller excludes every concurrent reader
