@@ -20,9 +20,6 @@ use crate::libgit2::src::util::errors::ErrorCode;
 
 /// Releases the iterator's owned traversal storage and tree references through C.
 /// No external state is needed and no repository reference is released.
-///
-/// Wraps: `git_note_iterator_free`
-/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NoteIteratorFree;
 
@@ -30,6 +27,8 @@ pub struct NoteIteratorFree;
 // the two note constructors; C dispatches the tree-specific disposer then frees
 // the common buffers and the allocation. No Rust allocation is passed to it.
 unsafe impl<'r> CDrop<NoteIterator<'r>> for NoteIteratorFree {
+    /// Wraps `fn::git_note_iterator_free`
+    #[doc(alias = "git_note_iterator_free")]
     unsafe fn c_drop(&self, ptr: NonNull<NoteIterator<'r>>) {
         // SAFETY: the caller transfers the live allocation once; transparent
         // NoteIterator preserves its C pointer and the repository is still live.
@@ -68,12 +67,13 @@ impl<'r> NoteIterator<'r> {
     ///
     /// [`ConfigRef::entry`]: crate::libgit2::src::libgit2::config::ConfigRef::entry
     ///
-    /// Wraps: `git_note_iterator_new`
+    /// Wraps `fn::git_note_iterator_new`
     ///
     /// # Errors
     ///
     /// A missing or invalid reference, a target that is not a commit, a notes tree missing from the
     /// object database and allocation failures return libgit2's error.
+    #[doc(alias = "git_note_iterator_new")]
     pub fn new(
         repo: RepositoryRef<'r>,
         notes_ref: Option<&CStr>,
@@ -113,12 +113,13 @@ impl<'r> NoteIterator<'r> {
     /// allocation failure or the tree's removal from the object database between the
     /// two reads can still reach the defect.
     ///
-    /// Wraps: `git_note_commit_iterator_new`
+    /// Wraps `fn::git_note_commit_iterator_new`
     ///
     /// # Errors
     ///
     /// Fails with libgit2's error when the commit's tree is missing from the object database, or
     /// when it runs out of memory.
+    #[doc(alias = "git_note_commit_iterator_new")]
     #[expect(
         clippy::missing_panics_doc,
         reason = "cannot panic: successful note iterator is non-null"
