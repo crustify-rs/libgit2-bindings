@@ -54,7 +54,7 @@ impl RepositoryRef<'_> {
     /// "`git_repository_fetchhead_foreach` callback returned -7" as the thread's error
     /// unless one is set already (by a libgit2 call the closure made, say).
     ///
-    /// Wraps: `git_repository_fetchhead_foreach`
+    /// Wraps `fn::git_repository_fetchhead_foreach`
     ///
     /// # Errors
     ///
@@ -62,6 +62,7 @@ impl RepositoryRef<'_> {
     /// entries before it were seen; with
     /// [`ErrorCode::NotFound`](crate::libgit2::src::util::errors::ErrorCode::NotFound) when there
     /// is no `FETCH_HEAD`, and for a repository without paths.
+    #[doc(alias = "git_repository_fetchhead_foreach")]
     pub fn for_each_fetchhead(
         &self,
         callback: &mut FetchheadForeachCallback<'_>,
