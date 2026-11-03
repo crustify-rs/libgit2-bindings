@@ -8,8 +8,11 @@
 //! received so far, as a `size_t`.
 //!
 //! It owns nothing, so it is held by value, copied freely and never released. libgit2 fills
-//! one in storage its caller provides: the indexer resets every counter when it reads a pack's
-//! header and advances them as it hashes objects and resolves deltas, a remote embeds the one
+//! one in storage its caller provides, which the caller zeroes first (`git_packbuilder_write`
+//! and the smart transport's download do): when the indexer reads a pack's header it sets
+//! `total_objects` to the header's count and resets the five other object and delta counters,
+//! then advances them as it receives and hashes objects and resolves deltas, while
+//! `received_bytes` is left to the transport that downloads the pack. A remote embeds the one
 //! its last download filled, and a progress callback borrows one for the duration of the call.
 //! The wrappers of those routines hand it out as an [`IndexerProgressRef`] or an
 //! [`IndexerProgressMut`] into that storage.
@@ -34,8 +37,8 @@ define_ctype!(
     ///
     /// A plain value of 32 bytes, resource-free: `Copy`, held inline, never released.
     /// Start from [`IndexerProgress::default`] or
-    /// [`IndexerProgress::zeroed`](ffibox::CZeroable::zeroed), every counter at 0, as the
-    /// indexer leaves it before a pack's header arrives. Read and write its counters through
+    /// [`IndexerProgress::zeroed`](ffibox::CZeroable::zeroed), every counter at 0, as callers
+    /// zero one before handing it to libgit2. Read and write its counters through
     /// [`as_ref`](Self::as_ref) / [`as_mut`](Self::as_mut).
     ///
     /// Wraps `ty::git_indexer_progress`
@@ -47,9 +50,9 @@ define_ctype!(
     ffi::git_indexer_progress
 );
 
-// SAFETY: all zero is every counter at 0, the state the indexer resets a progress to when it
-// reads a pack's header: every field is a plain integer, which the getters read and libgit2
-// counts from, and there is no teardown.
+// SAFETY: every field is a plain integer, so all zero is every counter at 0, a value every
+// getter and setter accepts and libgit2 counts from (its callers zero a progress before handing
+// it over: `git_packbuilder_write`, `git_smart__download_pack`), and there is no teardown.
 unsafe impl CZeroable for IndexerProgress {}
 
 // SAFETY: an `IndexerProgress` is 32 plain bytes: no pointer, no interior mutability, no thread

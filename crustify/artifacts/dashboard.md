@@ -227,8 +227,9 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/config` | `47` | `0` | review | `1` | `14` | `+198/-26` | `42.79`% / `99.49`% | `$8.96` | `25.80M` | `26m55s` | `$8.96` | `$0.64` |
 | `libgit2/index` | `49` | `0` | review | `15` | `5` | `+738/-79` | `45.75`% / `99.53`% | `$15.85` | `50.35M` | `46m20s` | `$1.06` | `$3.17` |
 | `libgit2/index` | `51` | `0` | review | `3` | `17` | `+203/-8` | `46.57`% / `99.53`% | `$12.82` | `35.96M` | `48m41s` | `$4.27` | `$0.75` |
+| `libgit2/src/libgit2/indexer.c` | `173` | `0` | review | `1` | `7` | `+10/-7` | — | `$<n>` | `<n>M` | `<n>m<n>s` | `$<n>` | `$<n>` |
 | **Σ first** |  |  |  | **`97`** | **`152`** | **`+89874/-2035`** | **`45.85`% / `99.54`%** | **`$530.95`** | **`1264.35M`** | — | **`$5.47`** | **`$3.49`** |
-| **Σ review** |  |  |  | **`96`** | **`145`** | **`+9264/-2031`** | **`46.57`% / `99.53`%** | **`$389.04`** | **`612.85M`** | — | **`$4.05`** | **`$2.68`** |
+| **Σ review** |  |  |  | **`97`** | **`152`** | **`+9274/-2038`** | **`46.57`% / `99.53`%** | **`$389.04`** | **`612.85M`** | — | **`$4.05`** | **`$2.68`** |
 
 ### Batches — wrap: tests
 
@@ -316,6 +317,7 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/config` | `47` | `0` | review | `+0` (`-0.02`/`+0.00` pp) | `+0` (`-0.29`/`-0.01` pp) | `+1` (`-0.04`/`-0.03` pp) | `+1` (`-0.02`/`+0.03` pp) |
 | `libgit2/index` | `49` | `0` | review | `+1` (`+0.08`/`-0.09` pp) | `+2` (`+0.33`/`+0.40` pp) | `+1` (`+0.18`/`-0.04` pp) | `+2` (`+0.00`/`+0.09` pp) |
 | `libgit2/index` | `51` | `0` | review | `+1` (`-0.01`/`+0.00` pp) | `+0` (`+0.04`/`+0.00` pp) | `+0` (`-0.01`/`+0.00` pp) | `+2` (`+0.10`/`+0.05` pp) |
+| `libgit2/src/libgit2/indexer.c` | `173` | `0` | review | `+0` (—/— pp) | `+0` (—/— pp) | `+0` (—/— pp) | `+0` (—/— pp) |
 | **Σ first** |  |  |  | **`+431` (`+24.85`/`-2.70` pp)** | **`+55` (`+16.78`/`-52.20` pp)** | **`+244` (`+31.12`/`-24.83` pp)** | **`+438` (`+12.61`/`+24.41` pp)** |
 | **Σ review** |  |  |  | **`+34` (`+0.37`/`+2.20` pp)** | **`+3` (`-0.40`/`-5.36` pp)** | **`+22` (`+2.71`/`-1.21` pp)** | **`+39` (`+4.66`/`+2.36` pp)** |
 
@@ -425,6 +427,7 @@ Deterministic `ffimap`; no model.
 | `libgit2/config` | `47` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `-1` | — | — | `+0` | `+0` |
 | `libgit2/index` | `49` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `-0.03` pp | `+0` | — | — | `+0` | `+0` |
 | `libgit2/index` | `51` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `+0` | — | — | `+0` | `+0` |
+| `libgit2/src/libgit2/indexer.c` | `173` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `+0` | `+0` | — | `+0` | `+0` |
 | **Σ first** |  |  |  |  | **`+4`** | **`+9`** | **`+8`** | **`+13`** | — | — | **`-0.64` pp** | **`+995`** | — | — | **`+7`** | **`+7`** |
 | **Σ review** |  |  |  |  | **`+0`** | **`+0`** | **`+0`** | **`-3`** | — | — | **`-0.14` pp** | **`+20`** | — | — | **`+0`** | **`-2`** |
 
@@ -454,7 +457,8 @@ Deterministic `ffimap`; no model.
 | `libgit2/config` | `47` | `0` | `+0` | `+0` | `+0` | `+0` | `+1` | `+0` | `+0` | `+3` | `4` |
 | `libgit2/index` | `49` | `0` | `+0` | `+2` | `+0` | `+1` | `+0` | `+0` | `+2` | `+2` | `7` |
 | `libgit2/index` | `51` | `0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+1` | `+4` | `5` |
-| **Σ** |  |  | **`+6`** | **`+9`** | **`+2`** | **`+1`** | **`+3`** | **`+3`** | **`+14`** | **`+49`** | **`87`** |
+| `libgit2/src/libgit2/indexer.c` | `173` | `0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+2` | `2` |
+| **Σ** |  |  | **`+6`** | **`+9`** | **`+2`** | **`+1`** | **`+3`** | **`+3`** | **`+14`** | **`+51`** | **`89`** |
 
 ## Symbols
 
@@ -1003,6 +1007,24 @@ tests cover every line, function and region of `src/libgit2/src/libgit2/indexer.
 calls no C. Its safety audit row fills `Send/Sync` (`+6`: `Send` and `Sync` for the value
 and its two handles) from the dotted ffimap counters `ty.impl_trait.of_which.std.send` and
 `.sync`; `C borrow`, `slice borrow` and `C by value` stay `—`.
+
+### `libgit2/src/libgit2/indexer.c` wave 173: review of `git_indexer_progress`
+
+Wave 173 batch 0 reviews wave 172 batch 0. Of its two reports, the `contracts` one (the
+`CZeroable` justification) is counted under `+misc`, since the table has no `contracts`
+column. Its `cov (C/Rust)` cell and test pairs stay `—`, as wave 172's do, for the same
+reason. Source-based coverage on `nightly-2026-10-07`, with the unit tests under
+`#[coverage(off)]` in a scratch copy, measured `src/libgit2/src/libgit2/indexer.rs` at
+100% of lines, functions and regions. The landing changes only comments, so every ffimap
+counter equals the wave tip's. The Miri gate passed on the wave tip (`lib` 324, `ub_safe`
+160, `ub_unsafe` 18 and `equiv` 32 passed, the tests that call C ignored). TSan and
+ASan/UBSan passed the workset's unit and `ub_safe` tests. On both the wave tip and the
+landed tree, five compile-fail snapshots of other modules (`commit_arc_no_mut_handle`,
+`mailmap_not_clone`, `object_arc_no_mut_handle`, `tag_and_tree_arc_no_mut_handle`,
+`tree_builder_not_clone`) mismatch. The installed ffibox is `0.1.1` while `Cargo.lock`
+pins `0.1.0`, and the actual output prints `/opt/venv/share/ffibox/src/refs.rs:<line>`
+where the snapshots expect `$FFIBOX/src/refs.rs`. They are left for a batch that owns
+those modules or the pin.
 
 ### Parallelism and review caps from `libgit2/repository`
 
