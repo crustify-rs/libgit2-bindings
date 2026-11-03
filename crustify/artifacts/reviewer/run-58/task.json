@@ -1,0 +1,18 @@
+{
+  "objectives": [
+    "conventions",
+    "fix"
+  ],
+  "paths": [
+    "src/libgit2/src/libgit2/oid.rs"
+  ],
+  "wave": 525,
+  "batch": 12,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-525",
+  "model": "openrouter/openai/gpt-6.1-sol",
+  "billing": "api",
+  "instructions": "instructions.md"
+}

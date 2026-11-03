@@ -13,7 +13,8 @@ and in Notes.
 - **translate-agent** — `openrouter/anthropic/claude-opus-5.5`, `api`
 - **review-agent** — `openrouter/anthropic/claude-opus-5.5`, `api`; objectives `all`
 - **plan-agent** — `anthropic/claude-opus-5-5`, `subscription`; `2` runs
-- **workload** — max-types `2`, max-syms `25`, max-loc `500`, parallelism `32` from the annotation pass (wave `525`), `16` before
+- **identity** — author `Marius Momeu <marius.momeu@berkeley.edu>`, co-author `crustify <crustify@berkeley.edu>`, from 2026-11-03; `crustify` as the author before
+- **workload** — max-types `2`, max-syms `25`, max-loc `500`, parallelism `assistant's choice` from 2026-11-03, `32` in the annotation pass (wave `525`), `16` before
 - **review-workload** — orchestrator's choice: max-types `20`, max-syms `100`
 - **sanitizers** — `asan-ubsan`, `tsan`, `bsan`
 - **target-config** — default, deprecated features disabled (`-DDEPRECATE_HARD=ON`), HTTPS through OpenSSL, SSH, Negotiate auth and i18n off, threads on; OpenSSL, PCRE2 and zlib from the side campaigns' installs of each variant; `build.json` version `3`
@@ -1311,3 +1312,19 @@ and `fix` objectives, one per `.rs` file, on the `paths` route, filing no report
 their batches fill no dashboard rows. Each file's checklist lists the scheduled items whose
 anchors sit in it, since the schedule's `home`s predate the current tree. From wave `525` the
 settings' `workload` answer raises the parallelism to `32` agents.
+
+Wave `525` landed all 40 files, at one commit each: `reviewer/run-53`, `run-60` and `run-72` under the
+prompts before the landing lock, `$1.82`, and `run-86` to `run-122` on the current prompts, `$30.73`,
+a median run of 15 minutes, all under `openrouter/openai/gpt-6.1-sol`. Its other 31 runs of
+`run-46` to `run-79` were paused while ffmpeg's wave `671` landed and then discarded, `$21.41`, so
+that their batches ran with trimmed instructions; `run-80` to `run-85` never started. Their records
+are kept. The 37 relaunched runs, up to 20 at once, landed one at a time under the landing lock,
+each rebasing once, in 41 minutes. The `/// Handwritten` markers, which ffibox's specs no longer ask
+for, were then removed from the tree, and the workspace's gates passed over the result but for the
+five `tests/ub_safe` compile-fail snapshots that fail on this host before any change, whose
+rustc gutter is wider than the snapshots record.
+
+From 2026-11-03 the settings' `workload` answer leaves the parallelism to the assistant, and their
+new `identity` answer makes Marius Momeu the author of the campaign's commits, with Crustify as
+co-author. `build.json`'s commands carry no job count, its `version` unchanged: the jobs are given
+through the environment of each run.
