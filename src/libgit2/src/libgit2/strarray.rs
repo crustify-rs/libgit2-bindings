@@ -67,7 +67,8 @@ define_ctype!(
     /// [`StrArrayView`] instead. Not `Clone`: it owns its strings, so a copy is
     /// [`StrArrayRef::to_str_array`], which allocates.
     ///
-    /// Wraps: git_strarray
+    /// Wraps `ty::git_strarray`
+    #[doc(alias = "git_strarray")]
     StrArray,
     StrArrayRef,
     StrArrayMut,
@@ -108,9 +109,6 @@ unsafe impl Sync for StrArrayMut<'_> {}
 /// synchronisation against the first `git_libgit2_init` another thread may be running.
 /// Nothing orders such an array after that initialisation, since nothing allocated for
 /// it. A non-NULL array is passed even when empty: libgit2 allocated it.
-///
-/// Wraps: `git_strarray_dispose`
-/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct StrArrayDispose;
 
@@ -122,6 +120,8 @@ pub struct StrArrayDispose;
 // lowering `count`. The array without a buffer, which `new`, `take_strings` and
 // `set_strings` of an empty run leave, owns nothing and is released without C.
 unsafe impl CDispose<StrArray> for StrArrayDispose {
+    /// Wraps `fn::git_strarray_dispose`
+    #[doc(alias = "git_strarray_dispose")]
     #[inline]
     unsafe fn c_dispose(&self, ptr: NonNull<StrArray>) {
         let raw: *mut ffi::git_strarray = ptr.as_ptr().cast();
@@ -179,7 +179,8 @@ impl<'a> StrArrayRef<'a> {
     /// The number of strings; 0 without a buffer, whatever `count` says, as
     /// [`get`](Self::get) and [`iter`](Self::iter) read it.
     ///
-    /// Field: `git_strarray.count`
+    /// Wraps `fld::git_strarray.count`
+    #[doc(alias = "git_strarray.count")]
     #[must_use]
     pub fn len(&self) -> usize {
         let array = self.as_ptr();
@@ -204,7 +205,8 @@ impl<'a> StrArrayRef<'a> {
     /// The string at `index`, borrowed in place for as long as the array is; `None`
     /// past the end.
     ///
-    /// Field: `git_strarray.strings`
+    /// Wraps `fld::git_strarray.strings`
+    #[doc(alias = "git_strarray.strings")]
     #[must_use]
     pub fn get(&self, index: usize) -> Option<&'a CStr> {
         (index < self.len()).then(|| self.at(index))
@@ -212,7 +214,8 @@ impl<'a> StrArrayRef<'a> {
 
     /// The strings, in order, each borrowed in place for as long as the array is.
     ///
-    /// Field: `git_strarray.strings`
+    /// Wraps `fld::git_strarray.strings`
+    #[doc(alias = "git_strarray.strings")]
     #[must_use]
     #[expect(
         clippy::iter_without_into_iter,
@@ -298,8 +301,6 @@ impl fmt::Debug for StrArrayMut<'_> {
 }
 
 /// The strings of a [`StrArrayRef`], in order, each borrowed for the array's lifetime.
-///
-/// Handwritten
 #[derive(Clone)]
 pub struct Iter<'a> {
     array: StrArrayRef<'a>,
@@ -341,8 +342,10 @@ impl fmt::Debug for Iter<'_> {
 impl StrArrayMut<'_> {
     /// Replaces the strings, and with them the count, releasing the ones held before.
     ///
-    /// Field: `git_strarray.strings`
-    /// Field: `git_strarray.count`
+    /// Wraps `fld::git_strarray.strings`
+    /// Wraps `fld::git_strarray.count`
+    #[doc(alias = "git_strarray.strings")]
+    #[doc(alias = "git_strarray.count")]
     pub fn set_strings(&mut self, strings: OdbDataStrVec) {
         drop(self.take_strings());
         let (strings, count) = strings.into_raw_parts();
@@ -364,7 +367,10 @@ impl StrArrayMut<'_> {
     /// `git_strarray_dispose` would release, owned. Edit them there (sort, push,
     /// remove) and [`set_strings`](Self::set_strings) them back.
     ///
-    /// Field: `git_strarray.strings`
+    /// Wraps `fld::git_strarray.strings`
+    /// Wraps `fld::git_strarray.count`
+    #[doc(alias = "git_strarray.strings")]
+    #[doc(alias = "git_strarray.count")]
     pub fn take_strings(&mut self) -> OdbDataStrVec {
         let array = self.as_mut_ptr();
         // SAFETY: reads the array through the exclusive handle's pointer to a live `git_strarray`.
@@ -386,7 +392,8 @@ impl StrArrayMut<'_> {
     /// changes when it holds no more than that. The array buffer is kept, and released
     /// whole on dispose.
     ///
-    /// Field: `git_strarray.count`
+    /// Wraps `fld::git_strarray.count`
+    #[doc(alias = "git_strarray.count")]
     pub fn truncate(&mut self, len: usize) {
         let old = self.as_ref().len();
         if len >= old {
@@ -431,9 +438,6 @@ impl StrArrayMut<'_> {
 /// let mut view = StrArrayView::default();
 /// view.as_mut().truncate(0);
 /// ```
-///
-/// Wraps: `git_strarray`
-/// Handwritten
 pub struct StrArrayView<'a> {
     /// `strings` addresses `_ptrs`' buffer, or is NULL when empty.
     array: StrArray,
