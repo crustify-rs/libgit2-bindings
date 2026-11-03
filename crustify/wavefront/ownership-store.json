@@ -15306,6 +15306,42 @@
    ]
   },
   {
+   "name": "git_mempack_new",
+   "defined_in": "src/libgit2/odb_mempack.c",
+   "lifetime": {
+    "for": "out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out-slot written only during the call (GIT_ASSERT_ARG rejects NULL); on success it receives a new calloc'd memory_packer_db the caller owns, released through its free member (impl__free) or handed to an odb. It sets no foreach, refresh, writepack or writemidx member."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_message_prettify",
    "defined_in": "src/libgit2/message.c",
    "ptr_args": [
@@ -16407,6 +16443,114 @@
       "nullable": true,
       "mutable": true,
       "note": "git__free(data) -> git__allocator.gfree: releases any git__malloc/git__calloc/git__realloc storage (an object, a buffer, or a NUL-terminated string) without reading it; NULL is a no-op. Strings: libgit2 makes its strings with git__strdup/git__strndup/git__substrdup (git__malloc) and releases them with git__free in git_strarray_dispose (each element, then the array), git_signature_free (name, email) and git_buf_dispose (ptr), none of which exports a single-string free, so this is the only exported releaser for one libgit2 string or a char** array of them; Rust OdbDataStrFree / OdbDataStrVec drop through it. Frees through the CURRENT allocator, so storage must not outlive a GIT_OPT_SET_ALLOCATOR swap."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_odb_backend_loose",
+   "defined_in": "src/libgit2/odb_loose.c",
+   "lifetime": {
+    "for": "backend_out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "backend_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:backend_out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out-slot written only during the call (GIT_ASSERT_ARG rejects NULL); on success it receives a new loose_backend the caller owns, released through its free member (loose_backend__free) or handed to an odb by git_odb_add_backend. Left untouched on failure."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_odb_backend_one_pack",
+   "defined_in": "src/libgit2/odb_pack.c",
+   "lifetime": {
+    "for": "backend_out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "backend_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:backend_out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out-slot written only during the call, not checked for NULL; on success it receives a new single-pack pack_backend the caller owns, released through its free member (pack_backend__free). Left untouched on failure."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_odb_backend_pack",
+   "defined_in": "src/libgit2/odb_pack.c",
+   "lifetime": {
+    "for": "backend_out",
+    "is_dropper": false,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": {
+     "alloc": true,
+     "init": false
+    }
+   },
+   "ptr_args": [
+    {
+     "name": "backend_out",
+     "ptr": {
+      "scalar": {
+       "by_ref": {
+        "owned": true,
+        "borrowed": null
+       }
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:backend_out"
+      },
+      "nullable": false,
+      "mutable": true,
+      "note": "Out-slot written only during the call, not checked for NULL; on success it receives a new pack_backend the caller owns, released through its free member (pack_backend__free) or handed to an odb by git_odb_add_backend. Set to NULL on failure, after the partial backend is freed."
      }
     }
    ]
@@ -25954,6 +26098,34 @@
    ]
   },
   {
+   "name": "impl__free",
+   "defined_in": "src/libgit2/odb_mempack.c",
+   "lifetime": {
+    "for": "_backend",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "_backend",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": false,
+      "mutable": true,
+      "note": "The mempack backend's free member: resets the backend (freeing every stored object and the commits array), disposes the object map and frees the container. Not NULL-safe (git_mempack_reset dereferences it)."
+     }
+    }
+   ]
+  },
+  {
    "name": "index_entry_create",
    "defined_in": "src/libgit2/index.c",
    "lifetime": {
@@ -26362,6 +26534,34 @@
    ]
   },
   {
+   "name": "loose_backend__free",
+   "defined_in": "src/libgit2/odb_loose.c",
+   "lifetime": {
+    "for": "_backend",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "_backend",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "The loose backend's free member: git__frees the whole loose_backend container (its objects_dir is inline). Called by odb_free for a backend an odb holds, or by the owner of one none holds. NULL is a git__free no-op."
+     }
+    }
+   ]
+  },
+  {
    "name": "malloc",
    "defined_in": null,
    "lifetime": {
@@ -26390,6 +26590,34 @@
      "note": "libc malloc: NON-zeroing; NULL on failure. Called directly by the stdalloc/debugalloc backends of git__allocator and by vendored deps (ntlmclient, reftable's default). Released by free."
     }
    }
+  },
+  {
+   "name": "pack_backend__free",
+   "defined_in": "src/libgit2/odb_pack.c",
+   "lifetime": {
+    "for": "_backend",
+    "is_dropper": true,
+    "is_disposer": false,
+    "is_cloner": null,
+    "is_constructor": null
+   },
+   "ptr_args": [
+    {
+     "name": "_backend",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": true,
+      "borrowed": null,
+      "nullable": true,
+      "mutable": true,
+      "note": "The pack backend's free member: puts every pack and midx pack back to the mwindow registry, frees the midx, both vectors, pack_folder and the container. Also called by git_odb_backend_pack and git_odb_backend_one_pack on failure. Returns early on NULL."
+     }
+    }
+   ]
   },
   {
    "name": "parse_names",

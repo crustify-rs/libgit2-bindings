@@ -2530,7 +2530,10 @@ impl fmt::Debug for OdbDataStrVec {
 /// backend without a reference (`backend`), and finishing a write reaches the backend
 /// and its odb (`git_odb_stream_finalize_write` reads `stream->backend->odb`; the
 /// stream libgit2 fakes for a backend without streaming writes calls the backend's
-/// `write`), so neither an owner nor a handle outlives the odb:
+/// `write`), so neither an owner nor a handle outlives the odb. A stream adopted with
+/// `OdbStreamBox::from_c` or borrowed with a handle's `from_ptr` must therefore hold,
+/// as every stream a backend makes does, NULL or the live backend that made it, which
+/// outlives `'o`: [`backend`](OdbStreamRef::backend) lends it.
 ///
 /// ```compile_fail,E0597
 /// use libgit2::libgit2::src::libgit2::object::ObjectType;
@@ -2651,9 +2654,10 @@ impl<'a> OdbStreamRef<'a, '_> {
         // SAFETY: a read through the shared handle's pointer to a live stream; any
         // value is a valid raw pointer.
         let backend = unsafe { backend_ptr.read() };
-        // SAFETY: a non-NULL `backend` is the backend that made the stream (the owner's
-        // adoption vouches for that), which the odb borrowed for `'o` keeps alive past
-        // `'a`; the handle only reads it, as the odb's own readers do.
+        // SAFETY: a non-NULL `backend` is the live backend that made the stream (libgit2
+        // set it, or the caller of the owner's `from_c` or the handle's `from_ptr`
+        // vouched for it, as `OdbStream` requires), which the odb borrowed for `'o` keeps
+        // alive past `'a`; the handle only reads it, as the odb's own readers do.
         unsafe { OdbBackendRef::from_ptr(backend) }
     }
 
@@ -2985,7 +2989,10 @@ fn passed() -> StreamError {
 ///
 /// `'o` is the borrow of the odb whose backend made the writepack: its indexer reads
 /// that odb to resolve the bases of a thin pack, and it keeps the backend without a
-/// reference, so neither an owner nor a handle outlives the odb. The exclusive handle
+/// reference, so neither an owner nor a handle outlives the odb. A writepack adopted
+/// with `OdbWritepackBox::from_c` or borrowed with a handle's `from_ptr` must
+/// therefore hold NULL or the live backend that made it, which outlives `'o`, as
+/// libgit2's does: [`backend`](OdbWritepackRef::backend) lends it. The exclusive handle
 /// is invariant in `'o`:
 ///
 /// ```compile_fail
@@ -3156,8 +3163,10 @@ impl<'a> OdbWritepackRef<'a, '_> {
         // SAFETY: a read through the shared handle's pointer to a live writepack; any
         // value is a valid raw pointer.
         let backend = unsafe { backend_ptr.read() };
-        // SAFETY: as in `OdbStreamRef::backend`: the backend that made the writepack,
-        // kept alive by the odb borrowed for `'o`, only read.
+        // SAFETY: as in `OdbStreamRef::backend`: the live backend that made the
+        // writepack (libgit2 set it, or the caller of `from_c` or `from_ptr` vouched for
+        // it, as `OdbWritepack` requires), kept alive by the odb borrowed for `'o`, only
+        // read.
         unsafe { OdbBackendRef::from_ptr(backend) }
     }
 }
@@ -3401,8 +3410,9 @@ unsafe impl CDrop<OdbBackend> for OdbBackendFree {
 /// `git_odb_backend_one_pack`) and a custom store's build one; adding it to an odb
 /// (`git_odb_add_backend`) hands it over. Until those are wrapped, an owner is adopted
 /// with `from_c`, whose caller vouches that the pointer is such a backend, complete,
-/// with its `free` member set, and held by nothing else. It is not `Clone`: libgit2
-/// copies no backend.
+/// and held by nothing else, an odb included. A backend without a `free` member is
+/// never released: the owner leaves it alone, and its storage stays its builder's. It
+/// is not `Clone`: libgit2 copies no backend.
 pub type OdbBackendBox = CBox<OdbBackend, OdbBackendFree>;
 
 const _: () = assert!(size_of::<OdbBackend>() == size_of::<ffi::git_odb_backend>());
@@ -4843,8 +4853,9 @@ mod unit_tests {
         use super::*;
         use crate::libgit2::src::libgit2::indexer::IndexerProgress;
 
-        /// A stream with every field set, its members `read`/`write`/`finalize_write`
-        /// present when `members` is set.
+        /// A stream with every field set but `backend`, which is NULL, as for a stream no
+        /// backend set up; its members `read`/`write`/`finalize_write` present when
+        /// `members` is set.
         fn raw_stream(members: bool) -> ffi::git_odb_stream {
             unsafe extern "C" fn read(
                 _: *mut ffi::git_odb_stream,
@@ -4867,7 +4878,7 @@ mod unit_tests {
                 0
             }
             ffi::git_odb_stream {
-                backend: ptr::without_provenance_mut(0x1000),
+                backend: ptr::null_mut(),
                 mode: ffi::GIT_STREAM_RW,
                 hash_ctx: if members {
                     ptr::without_provenance_mut(0x2000)
@@ -4886,12 +4897,26 @@ mod unit_tests {
 
         #[test]
         fn stream_getters_read_every_field() {
+            // The template a custom backend starts from, built without C for Miri.
+            let mut backend = ffi::git_odb_backend {
+                version: ffi::GIT_ODB_BACKEND_VERSION,
+                ..ffi::git_odb_backend::default()
+            };
+            let backend_ptr = &raw mut backend;
             for members in [true, false] {
                 let mut raw = raw_stream(members);
+                // The backend that made the stream, or none.
+                if members {
+                    raw.backend = backend_ptr;
+                }
                 // SAFETY: `raw` is a live stream in Rust storage, only read through the
-                // handle while it lives.
+                // handle while it lives; its `backend` is NULL or `backend`, a live local
+                // that outlives the handle and is only read meanwhile.
                 let s = unsafe { OdbStreamRef::from_ptr(&raw mut raw) }.unwrap();
-                assert_eq!(s.backend().map(|b| b.as_ptr().addr()), Some(0x1000));
+                assert_eq!(
+                    s.backend().map(|b| (b.as_ptr().addr(), b.version())),
+                    members.then(|| (backend_ptr.addr(), ffi::GIT_ODB_BACKEND_VERSION))
+                );
                 assert_eq!(s.mode(), ffi::GIT_STREAM_RW);
                 assert_eq!(s.has_hash_ctx(), members);
                 if members {
