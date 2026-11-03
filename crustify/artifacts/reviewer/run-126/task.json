@@ -1,0 +1,14 @@
+{
+  "commits": [
+    "9fe83bce60830288bb2f8157a6c7962abb1927f1"
+  ],
+  "wave": 181,
+  "batch": 0,
+  "link_unit": "libgit2",
+  "module": "src/libgit2/odb.c",
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-181",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api",
+  "instructions": "instructions.md"
+}
