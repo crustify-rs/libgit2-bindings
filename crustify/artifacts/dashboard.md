@@ -62,8 +62,8 @@ in Notes.
 | UB safe tests | `780` | — | `35.80`% | `84.57`% |
 | UB unsafe tests | `100` | — | `22.20`% | `12.70`% |
 | Equiv tests | `474` | — | `43.73`% | `76.50`% |
-| Unit tests | `747` | — | `32.13`% | `87.48`% |
-| **Total tests** | **`2101`** | — | **`46.65`%** | **`99.55`%** |
+| Unit tests | `748` | — | `32.13`% | `87.48`% |
+| **Total tests** | **`2102`** | — | **`46.65`%** | **`99.55`%** |
 | total types | `258` | — | — | — |
 | ported types | `0` | `0.00`% | — | — |
 | wrapped types | `102` | `39.53`% | — | — |
@@ -542,8 +542,9 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/index` | `51` | `1` | wrap | review | `55` | — | `+442/-9` | `46.58`% / `99.53`% | `$12.37` | `39.58M` | `39m02s` | `$0.22` | — |
 | `libgit2/index` | `53` | `0` | wrap | review | `19` | — | `+190/-21` | `46.64`% / `99.55`% | `$20.10` | `42.35M` | `1h18m28s` | `$1.06` | — |
 | `libgit2/src/libgit2/odb.c` | `177` | `0` | wrap | review | `22` | — | `+23/-2` | — | `$7.52` | `23.94M` | `28m33s` | `$0.34` | — |
+| `libgit2/src/libgit2/indexer.c` | `179` | `0` | wrap | review | `1` | — | `+35/-0` | — | `$<n>` | `<n>M` | `<n>m<n>s` | `$<n>` | — |
 | **Σ first** |  |  |  |  | **`412`** | **`7930`** | **`+65181/-2478`** | **`46.66`% / `99.55`%** | **`$395.96`** | **`1217.33M`** | — | **`$0.96`** | **`$0.05`** |
-| **Σ review** |  |  |  |  | **`411`** | — | **`+6709/-1297`** | **`46.64`% / `99.55`%** | **`$320.39`** | **`586.58M`** | — | **`$0.78`** | — |
+| **Σ review** |  |  |  |  | **`412`** | — | **`+6744/-1297`** | **`46.64`% / `99.55`%** | **`$320.39`** | **`586.58M`** | — | **`$0.78`** | — |
 
 ### Batches: tests
 
@@ -611,8 +612,9 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/index` | `51` | `1` | review | `+2` (`+0.04`/`+0.01` pp) | `+0` (`-0.02`/`-0.06` pp) | `+0` (`+0.01`/`+0.16` pp) | `+4` (`+0.16`/`+0.17` pp) |
 | `libgit2/index` | `53` | `0` | review | `+3` (`+0.01`/`+0.01` pp) | `+0` (`+0.10`/`+0.00` pp) | `+1` (`+0.00`/`+0.01` pp) | `+1` (`-0.02`/`+0.00` pp) |
 | `libgit2/src/libgit2/odb.c` | `177` | `0` | review | `+0` (—/— pp) | `+0` (—/— pp) | `+0` (—/— pp) | `+0` (—/— pp) |
+| `libgit2/src/libgit2/indexer.c` | `179` | `0` | review | `+0` (—/— pp) | `+0` (—/— pp) | `+0` (—/— pp) | `+1` (—/— pp) |
 | **Σ first** |  |  |  | **`+273` (`+10.21`/`+6.04` pp)** | **`+17` (`+3.17`/`-8.14` pp)** | **`+187` (`+8.99`/`+13.91` pp)** | **`+214` (`+11.76`/`-33.75` pp)** |
-| **Σ review** |  |  |  | **`+14` (`+0.34`/`-1.41` pp)** | **`+2` (`-0.92`/`+0.27` pp)** | **`+19` (`+0.09`/`-0.37` pp)** | **`+32` (`+2.44`/`+7.45` pp)** |
+| **Σ review** |  |  |  | **`+14` (`+0.34`/`-1.41` pp)** | **`+2` (`-0.92`/`+0.27` pp)** | **`+19` (`+0.09`/`-0.37` pp)** | **`+33` (`+2.44`/`+7.45` pp)** |
 
 ### Batches: safety audit
 
@@ -682,6 +684,7 @@ Deterministic `ffimap`; no model.
 | `libgit2/index` | `51` | `1` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `+7` | — | — | `+0` | `+0` |
 | `libgit2/index` | `53` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `+0` | — | — | `+0` | `+0` |
 | `libgit2/src/libgit2/odb.c` | `177` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `+0` | `+0` | — | `+0` | `+0` |
+| `libgit2/src/libgit2/indexer.c` | `179` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `-0.00` pp | `+0` | `+0` | — | `+0` | `+0` |
 | **Σ first** |  |  |  |  | **`+1`** | **`+1`** | **`-2`** | **`+41`** | — | — | **`+18.26` pp** | **`+571`** | — | — | **`+6`** | **`+12`** |
 | **Σ review** |  |  |  |  | **`+0`** | **`+0`** | **`+0`** | **`+1`** | — | — | **`-0.38` pp** | **`+19`** | — | — | **`+0`** | **`-1`** |
 
@@ -716,7 +719,8 @@ Deterministic `ffimap`; no model.
 | `libgit2/index` | `51` | `1` | — | `+0` | `+1` | `+0` | `+0` | `+0` | `+0` | `+5` | `6` |
 | `libgit2/index` | `53` | `0` | — | `+0` | `+0` | `+0` | `+1` | `+0` | `+1` | `+4` | `6` |
 | `libgit2/src/libgit2/odb.c` | `177` | `0` | `+1` | `+0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+1` | `2` |
-| **Σ** |  |  | **`+1`** | **`+5`** | **`+3`** | **`+1`** | **`+3`** | **`+4`** | **`+11`** | **`+47`** | **`75`** |
+| `libgit2/src/libgit2/indexer.c` | `179` | `0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+1` | `+0` | `+0` | `1` |
+| **Σ** |  |  | **`+1`** | **`+5`** | **`+3`** | **`+1`** | **`+3`** | **`+5`** | **`+11`** | **`+47`** | **`76`** |
 
 ## Notes
 
@@ -1191,6 +1195,28 @@ tests stop at `statx` (file system isolation) and the `equiv` test at `git_libgi
 No test of the batch is expected to trigger BorrowSanitizer, so none ran under it. The five
 compile-fail snapshots of other modules still mismatch from the ffibox pin drift. The three
 new snapshots pass.
+
+### `libgit2/src/libgit2/indexer.c` wave 179: review of wave 178
+
+Wave 179 batch 0 reviews wave 178's `ProgressCallback` and files one `internal` report,
+`progress-callback-stale-panic`. When the walk itself unwinds after the closure panicked
+inside C, `walk_with` never takes the stored panic. Every later call then cancels without
+running the closure and resumes the old panic. The fix drops any stored panic before
+each walk starts, and the reproducing unit test becomes its regression test. `walk_with` is
+`pub(crate)`, so no public path reached the defect. The lifecycle, unsafety, contracts,
+UB, equivalence, conventions and ownership-store checks found nothing more. Every C invoker
+lends a non-NULL progress for the call only, and the store's findings match the other
+callbacks'. `+LoC` is `indexer.rs` alone: 5 non-test lines and the 30-line test.
+
+The `cov (C/Rust)` cells stay `—`, as wave 178's do. Wave 178's method, run on the landed
+tree, measures `src/libgit2/src/libgit2/indexer.rs` at 100% of lines (165), functions (32)
+and regions (157), so no coverage tests were added. The safety audit row comes from
+`ffimap` scans of the wave base (`f1f360f7b`) and this tree. Every counter is equal; the
+unsafe LoC share falls by 0.001 pp. The Miri gate passed on the wave tip in all four
+binaries, and its indexer tests pass again on the fixed tree. The indexer unit,
+`ub_safe` and `equiv` tests pass under ASan+UBSan and TSan. This wave is not the module's
+last, so BSan was not run. `cargo test --workspace` passes, except for the five
+compile-fail snapshots that the ffibox pin drift breaks.
 
 ### Parallelism and review caps from `libgit2/repository`
 

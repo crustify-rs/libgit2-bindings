@@ -483,10 +483,15 @@ impl<'f> ProgressCallback<'f> {
     /// them to it, then resumes a panic the closure raised meanwhile. The payload is this
     /// callback, which nothing else touches until `walk` returns; libgit2 must be done
     /// calling it by then.
+    ///
+    /// A walk that unwinds itself, rather than returning, leaves a panic of the closure
+    /// behind; it belonged to that walk, so it is dropped here, before the walk it would
+    /// otherwise cancel and resume from.
     pub(crate) fn walk_with<R>(
         &mut self,
         walk: impl FnOnce(ffi::git_indexer_progress_cb, *mut c_void) -> R,
     ) -> R {
+        self.panic = None;
         let result = walk(Some(progress_with), ptr::from_mut(self).cast());
         if let Some(panic) = self.panic.take() {
             panic::resume_unwind(panic);
@@ -934,6 +939,36 @@ mod unit_tests {
         );
         drop(callback);
         assert_eq!(seen, [IndexerProgress::from(raw(11)), progress]);
+    }
+
+    #[test]
+    fn a_walk_that_unwinds_leaves_no_stale_panic() {
+        let mut calls = 0;
+        let mut f = |_: IndexerProgressRef<'_>| -> ControlFlow<()> {
+            calls += 1;
+            assert!(calls > 1, "first call");
+            ControlFlow::Continue(())
+        };
+        let mut callback = ProgressCallback::new(&mut f);
+        // The closure panics inside the walk, which then unwinds on its own before
+        // `walk_with` could resume the closure's panic.
+        let walked = panic::catch_unwind(AssertUnwindSafe(|| {
+            callback.walk_with(|cb, payload| {
+                let progress = IndexerProgress::zeroed();
+                // SAFETY: `payload` is the callback `walk_with` lends; `progress` is live.
+                let rc = unsafe { cb.unwrap()(progress.as_ref().as_ptr(), payload) };
+                assert_eq!(rc, ErrorCode::User.raw());
+                panic!("the walk");
+            });
+        }));
+        assert_eq!(*walked.unwrap_err().downcast::<&str>().unwrap(), "the walk");
+        // A later, unrelated call runs the closure, rather than cancelling and resuming
+        // the panic of the walk that unwound.
+        let progress = IndexerProgress::zeroed();
+        let later = panic::catch_unwind(AssertUnwindSafe(|| callback.call(progress.as_ref())));
+        assert_eq!(later.ok(), Some(ControlFlow::Continue(())));
+        drop(callback);
+        assert_eq!(calls, 2);
     }
 
     #[test]
