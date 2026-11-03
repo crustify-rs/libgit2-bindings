@@ -11950,7 +11950,7 @@
       "module": "src/libgit2/indexer.c",
       "foundational": false,
       "reviews": 172,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
           172
@@ -11967,11 +11967,14 @@
         {
           "index": 0,
           "kind": "review",
-          "status": "todo",
+          "status": "done",
           "reviews": [
             0
           ],
-          "commits": []
+          "commits": [
+            "293ea06dbe6b0f89d129907af3b88b9d4dd3aee3",
+            "1e2153bca79d314f3560e48ee4d643f21bc1ef54"
+          ]
         }
       ]
     },

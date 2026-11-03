@@ -1,0 +1,14 @@
+{
+  "commits": [
+    "9f243dd2ec60c1ef2ad88343d56f1efae544b57c"
+  ],
+  "wave": 173,
+  "batch": 0,
+  "link_unit": "libgit2",
+  "module": "src/libgit2/indexer.c",
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-173",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api",
+  "instructions": "instructions.md"
+}
