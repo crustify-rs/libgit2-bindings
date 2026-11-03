@@ -116,7 +116,8 @@ define_ctype!(
     /// let _ = Index(Default::default(), core::marker::PhantomData);
     /// ```
     ///
-    /// Wraps: git_index
+    /// Wraps `ty::git_index`
+    #[doc(alias = "git_index")]
     Index,
     IndexRef,
     IndexMut,
@@ -130,20 +131,24 @@ define_ctype!(
 /// `git_index_free` is the only releaser for every reference libgit2 hands out, so the
 /// policy settles both [`IndexBox`] and [`IndexArc`]. It counts no copies: libgit2
 /// publishes no `up_ref`.
-///
-/// Wraps: `git_index_free`
-/// Wraps: `git_index_new`
-/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct IndexFree;
 
-impl_cdrop!(IndexFree, Index, ffi::git_index_free);
+impl_cdrop!(
+    /// Wraps `fn::git_index_free`
+    #[doc(alias = "git_index_free")]
+    IndexFree,
+    Index,
+    ffi::git_index_free
+);
 
 // SAFETY: `Index::new` returns a fresh index from `git_index_new`, fully initialised,
 // holding its only reference (count 1, no owning repository), which `git_index_free`
 // releases; it fails only when libgit2 does (out of memory, or it cannot be
 // initialised).
 unsafe impl CNew<Index> for IndexFree {
+    /// Wraps `fn::git_index_new`
+    #[doc(alias = "git_index_new")]
     fn c_new(&self) -> Option<NonNull<Index>> {
         Index::new()
             .ok()
@@ -267,7 +272,8 @@ define_ctype!(
     /// options.as_ref().set_oid_type(None);
     /// ```
     ///
-    /// Wraps: git_index_options
+    /// Wraps `ty::git_index_options`
+    #[doc(alias = "git_index_options")]
     #[derive(Clone, Copy)]
     IndexOptions,
     IndexOptionsRef,
@@ -304,12 +310,13 @@ impl IndexOptions {
     /// `GIT_INDEX_OPTIONS_VERSION`, and with that version it reaches no global, no
     /// allocator and no thread state, so this needs no initialised library.
     ///
-    /// Wraps: `git_index_options_init`
+    /// Wraps `fn::git_index_options_init`
     ///
     /// # Panics
     ///
     /// Panics only if libgit2 refuses the version of the options it defines itself, which it never
     /// does.
+    #[doc(alias = "git_index_options_init")]
     #[must_use]
     pub fn new() -> Self {
         let mut raw = MaybeUninit::<ffi::git_index_options>::uninit();
@@ -365,7 +372,8 @@ impl fmt::Debug for IndexOptions {
 impl IndexOptionsRef<'_> {
     /// The struct's version, `GIT_INDEX_OPTIONS_VERSION`.
     ///
-    /// Field: `git_index_options.version`
+    /// Wraps `fld::git_index_options.version`
+    #[doc(alias = "git_index_options.version")]
     #[must_use]
     pub fn version(&self) -> u32 {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -379,7 +387,8 @@ impl IndexOptionsRef<'_> {
     /// The type of the object ids in the index; `None` when unset, which libgit2 reads
     /// as [`OidType::default`] (SHA-1).
     ///
-    /// Field: `git_index_options.oid_type`
+    /// Wraps `fld::git_index_options.oid_type`
+    #[doc(alias = "git_index_options.oid_type")]
     #[must_use]
     pub fn oid_type(&self) -> Option<OidType> {
         OidType::from_raw(self.raw_oid_type())
@@ -409,7 +418,8 @@ impl IndexOptionsMut<'_> {
     /// Sets the type of the object ids in the index, or unsets it with `None` (stored
     /// as 0) so that libgit2 picks its default.
     ///
-    /// Field: `git_index_options.oid_type`
+    /// Wraps `fld::git_index_options.oid_type`
+    #[doc(alias = "git_index_options.oid_type")]
     pub fn set_oid_type(&mut self, oid_type: Option<OidType>) {
         let raw = oid_type.map_or(0, OidType::raw);
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
@@ -440,8 +450,6 @@ impl Index {
     /// object database or working directory (adding by path, writing a tree), but every
     /// in-memory operation works on it. Its object ids are SHA1
     /// ([`with_oid_type`](Self::with_oid_type) chooses).
-    ///
-    /// Wraps: `git_index_new`
     ///
     /// # Errors
     ///
@@ -480,13 +488,14 @@ impl Index {
     /// past its end (a truncated file, say): its reader returns before freeing the path
     /// it decompressed for that entry.
     ///
-    /// Wraps: `git_index_open`
+    /// Wraps `fn::git_index_open`
     ///
     /// # Errors
     ///
     /// Fails, with libgit2's error, when the file exists but cannot be read (a directory,
     /// say) or is not a valid index, and when libgit2 runs out of memory or cannot be
     /// initialised; libgit2 reports each of these as its generic error (`-1`).
+    #[doc(alias = "git_index_open")]
     pub fn open(path: &CStr) -> Result<IndexBox, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
@@ -512,11 +521,12 @@ impl Index {
     ///
     /// libgit2 asserts the type is one it names, which [`OidType`] guarantees.
     ///
-    /// Wraps: `git_index_new_ext`
+    /// Wraps `fn::git_index_new_ext`
     ///
     /// # Errors
     ///
     /// Fails with libgit2's error when it cannot be initialised or the index cannot be allocated.
+    #[doc(alias = "git_index_new_ext")]
     pub fn with_oid_type(oid_type: OidType) -> Result<IndexBox, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
@@ -538,7 +548,7 @@ impl Index {
     /// only setting `git_index_options` holds, and libgit2 asserts it is one it names,
     /// which [`OidType`] guarantees.
     ///
-    /// Wraps: `git_index_open_ext`
+    /// Wraps `fn::git_index_open_ext`
     ///
     /// # Errors
     ///
@@ -546,6 +556,7 @@ impl Index {
     ///
     /// Fails, otherwise, with libgit2's error when an existing file cannot be read, or does not
     /// parse as an index of `oid_type`.
+    #[doc(alias = "git_index_open_ext")]
     pub fn open_with_oid_type(path: &CStr, oid_type: OidType) -> Result<IndexBox, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
@@ -588,7 +599,8 @@ fn extension_key(signature: &[u8; 4]) -> Option<[u8; 5]> {
 impl IndexRef<'_> {
     /// The number of entries in the index, conflict entries (one per side) included.
     ///
-    /// Wraps: `git_index_entrycount`
+    /// Wraps `fn::git_index_entrycount`
+    #[doc(alias = "git_index_entrycount")]
     #[must_use]
     pub fn entry_count(&self) -> usize {
         // SAFETY: the handle addresses a live index, whose entry vector's length libgit2
@@ -599,7 +611,8 @@ impl IndexRef<'_> {
     /// Whether any entry is a conflict side: of a stage other than
     /// [`Stage::Normal`].
     ///
-    /// Wraps: `git_index_has_conflicts`
+    /// Wraps `fn::git_index_has_conflicts`
+    #[doc(alias = "git_index_has_conflicts")]
     #[must_use]
     pub fn has_conflicts(&self) -> bool {
         // SAFETY: the handle addresses a live index; libgit2 only reads its entries' flags
@@ -611,7 +624,8 @@ impl IndexRef<'_> {
     /// read from its owning repository's configuration. Never
     /// [`CapabilitySetting::FromOwner`]: libgit2 resolves that when it is set.
     ///
-    /// Wraps: `git_index_caps`
+    /// Wraps `fn::git_index_caps`
+    #[doc(alias = "git_index_caps")]
     #[must_use]
     pub fn capabilities(&self) -> Capabilities {
         // SAFETY: the handle addresses a live index, whose three capability bits libgit2
@@ -634,7 +648,8 @@ impl IndexRef<'_> {
     ///
     /// [`RepositoryMut::set_index`]: crate::libgit2::src::libgit2::repository::RepositoryMut::set_index
     ///
-    /// Wraps: `git_index_owner`
+    /// Wraps `fn::git_index_owner`
+    #[doc(alias = "git_index_owner")]
     #[must_use]
     pub fn has_owner(&self) -> bool {
         // SAFETY: the handle addresses a live index, whose owner field libgit2 only reads;
@@ -645,7 +660,8 @@ impl IndexRef<'_> {
     /// Whether `repo` is the repository keeping this index as its own (see
     /// [`has_owner`](Self::has_owner)).
     ///
-    /// Wraps: `git_index_owner`
+    /// Wraps `fn::git_index_owner`
+    #[doc(alias = "git_index_owner")]
     #[must_use]
     pub fn is_owned_by(&self, repo: RepositoryRef<'_>) -> bool {
         // SAFETY: as in `has_owner`; the pointer is only compared.
@@ -660,12 +676,13 @@ impl IndexMut<'_> {
     /// reads from and writes to its file. Only the index in memory changes until it is
     /// written.
     ///
-    /// Wraps: `git_index_clear`
+    /// Wraps `fn::git_index_clear`
     ///
     /// # Errors
     ///
     /// Fails only with libgit2's error, which a sole owner's index never reports: the
     /// removals allocate only while a snapshot iterator reads the index.
+    #[doc(alias = "git_index_clear")]
     pub fn clear(&mut self) -> Result<(), ErrorBuf> {
         // SAFETY: the exclusive handle addresses a live index that no borrow reads: every
         // entry, name and extension it frees is unreachable from Rust.
@@ -695,7 +712,7 @@ impl IndexMut<'_> {
     /// [`ErrorCode::InvalidSpec`]: crate::libgit2::src::util::errors::ErrorCode::InvalidSpec
     /// [`ErrorCode::UnbornBranch`]: crate::libgit2::src::util::errors::ErrorCode::UnbornBranch
     ///
-    /// Wraps: `git_index_add_bypath`
+    /// Wraps `fn::git_index_add_bypath`
     ///
     /// # Errors
     ///
@@ -706,6 +723,7 @@ impl IndexMut<'_> {
     /// libgit2's error for a path an index cannot hold (`""`, `"d/"`, `".git/config"`,
     /// `"./a"`; [`ErrorCode::InvalidSpec`] for one too long for the file system) or a
     /// file it cannot read.
+    #[doc(alias = "git_index_add_bypath")]
     pub fn add_path(&mut self, path: &CStr) -> Result<(), RepositoryError> {
         // SAFETY: the exclusive handle addresses a live index that no borrow reads, and
         // `path` is a NUL-terminated string read and copied for the call. Whatever libgit2
@@ -746,12 +764,13 @@ impl IndexMut<'_> {
     /// [`ErrorCode::InvalidSpec`]: crate::libgit2::src::util::errors::ErrorCode::InvalidSpec
     /// [`Pathspec::new`]: crate::libgit2::src::libgit2::pathspec::Pathspec::new
     ///
-    /// Wraps: `git_index_add_all`
+    /// Wraps `fn::git_index_add_all`
     ///
     /// # Errors
     ///
     /// Otherwise fails with [`ErrorCode::BareRepo`] for a bare repository, and with
     /// libgit2's error when a file cannot be read or written as a blob.
+    #[doc(alias = "git_index_add_all")]
     pub fn add_all(
         &mut self,
         pathspec: StrArrayRef<'_>,
@@ -795,7 +814,8 @@ impl IndexMut<'_> {
     ///
     /// Takes the exclusive handle: libgit2 sorts the entries first.
     ///
-    /// Wraps: `git_index_find`
+    /// Wraps `fn::git_index_find`
+    #[doc(alias = "git_index_find")]
     pub fn find(&mut self, path: &CStr) -> Option<usize> {
         let mut position = 0;
         // SAFETY: the exclusive handle addresses a live index, whose entry vector libgit2
@@ -821,7 +841,8 @@ impl IndexMut<'_> {
     ///
     /// Takes the exclusive handle: libgit2 sorts the entries first.
     ///
-    /// Wraps: `git_index_find_prefix`
+    /// Wraps `fn::git_index_find_prefix`
+    #[doc(alias = "git_index_find_prefix")]
     pub fn find_prefix(&mut self, prefix: &CStr) -> Option<usize> {
         let caps = self.as_ref().capabilities();
         if caps.contains(Capabilities::IGNORE_CASE) {
@@ -855,11 +876,12 @@ impl IndexMut<'_> {
     ///
     /// [`ErrorCode::NotFound`]: crate::libgit2::src::util::errors::ErrorCode::NotFound
     ///
-    /// Wraps: `git_index_conflict_remove`
+    /// Wraps `fn::git_index_conflict_remove`
     ///
     /// # Errors
     ///
     /// Fails with [`ErrorCode::NotFound`] when the index has no entry at `path` at all.
+    #[doc(alias = "git_index_conflict_remove")]
     pub fn remove_conflict(&mut self, path: &CStr) -> Result<(), RepositoryError> {
         // SAFETY: the exclusive handle addresses a live index that no borrow reads, so the
         // entries libgit2 frees are unreachable from Rust; `path` is a NUL-terminated
@@ -875,12 +897,13 @@ impl IndexMut<'_> {
     /// Removes every conflict side: every entry of a stage other than
     /// [`Stage::Normal`].
     ///
-    /// Wraps: `git_index_conflict_cleanup`
+    /// Wraps `fn::git_index_conflict_cleanup`
     ///
     /// # Errors
     ///
     /// Fails only with libgit2's error, which a sole owner's index never reports, as
     /// for [`clear`](Self::clear).
+    #[doc(alias = "git_index_conflict_cleanup")]
     pub fn clear_conflicts(&mut self) -> Result<(), ErrorBuf> {
         // SAFETY: as in `remove_conflict`.
         let rc = unsafe { ffi::git_index_conflict_cleanup(self.as_mut_ptr()) };
@@ -896,7 +919,7 @@ impl IndexMut<'_> {
     ///
     /// Takes the exclusive handle: libgit2 sorts the extensions first.
     ///
-    /// Wraps: `git_index_extension_lookup`
+    /// Wraps `fn::git_index_extension_lookup`
     ///
     /// # Errors
     ///
@@ -907,6 +930,7 @@ impl IndexMut<'_> {
     /// # Panics
     ///
     /// Panics, with `a successful lookup allocates its copy`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_index_extension_lookup")]
     pub fn extension(&mut self, signature: &[u8; 4]) -> Result<Option<OdbDataVec<u8>>, ErrorBuf> {
         let key = extension_key(signature).ok_or_else(last)?;
         let mut out = ffi::git_buf {
@@ -945,7 +969,7 @@ impl IndexMut<'_> {
     ///
     /// libgit2 leaks the new extension when it runs out of memory growing its list.
     ///
-    /// Wraps: `git_index_extension_add`
+    /// Wraps `fn::git_index_extension_add`
     ///
     /// # Errors
     ///
@@ -954,6 +978,7 @@ impl IndexMut<'_> {
     /// NUL when it searches for one. So is `data` of 4 GiB or more (`u32::MAX` bytes),
     /// whose size the extension header cannot hold. Otherwise fails only with libgit2's
     /// error when it runs out of memory.
+    #[doc(alias = "git_index_extension_add")]
     pub fn set_extension(&mut self, signature: &[u8; 4], data: &[u8]) -> Result<(), ErrorBuf> {
         let key = extension_key(signature).ok_or_else(last)?;
         if !u32::try_from(data.len()).is_ok_and(|len| len < u32::MAX) {
@@ -979,7 +1004,7 @@ impl IndexMut<'_> {
 
     /// Removes the extension with `signature`; `false` when the index has none.
     ///
-    /// Wraps: `git_index_extension_remove`
+    /// Wraps `fn::git_index_extension_remove`
     ///
     /// # Errors
     ///
@@ -987,6 +1012,7 @@ impl IndexMut<'_> {
     /// [`set_extension`](Self::set_extension).
     ///
     /// Fails, otherwise, with libgit2's error when it runs out of memory sorting the extensions.
+    #[doc(alias = "git_index_extension_remove")]
     pub fn remove_extension(&mut self, signature: &[u8; 4]) -> Result<bool, ErrorBuf> {
         let key = extension_key(signature).ok_or_else(last)?;
         // SAFETY: as in `set_extension`, for the extension libgit2 frees; `key` is a
@@ -1006,8 +1032,8 @@ impl IndexMut<'_> {
 /// workdir-diff implementation includes ignored files only when the entire flags
 /// value equals `FORCE`, not when `FORCE` is combined with another flag.
 ///
-/// Wraps: `git_index_add_option_t`
-/// Handwritten
+/// Wraps `ty::git_index_add_option_t`
+#[doc(alias = "git_index_add_option_t")]
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct AddFlags(ffi::git_index_add_option_t);
@@ -1080,8 +1106,8 @@ impl core::ops::BitOrAssign for AddFlags {
 /// reading the owning repository's configuration instead. Values own no foreign
 /// resources and may be freely copied, shared or moved between threads.
 ///
-/// Wraps: `git_index_capability_t`
-/// Handwritten
+/// Wraps `ty::git_index_capability_t`
+#[doc(alias = "git_index_capability_t")]
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Capabilities(ffi::git_index_capability_t);
@@ -1290,8 +1316,8 @@ type MatchedPathFn<'f> = dyn FnMut(&CStr, Option<&CStr>) -> MatchedPathResult + 
 /// std::thread::scope(|s| { s.spawn(move || drop(callback)); });
 /// ```
 ///
-/// Wraps: `git_index_matched_path_cb`
-/// Handwritten
+/// Wraps `ty::git_index_matched_path_cb`
+#[doc(alias = "git_index_matched_path_cb")]
 pub struct MatchedPathCallback<'f> {
     f: &'f mut MatchedPathFn<'f>,
     stopped: Option<c_int>,
@@ -1398,8 +1424,8 @@ impl<'f> MatchedPathCallback<'f> {
 /// `Any` is not a stored entry stage; operations requiring a concrete stage must
 /// reject it. Raw values not named by the header are never transmuted into Rust.
 ///
-/// Wraps: `git_index_stage_t`
-/// Handwritten
+/// Wraps `ty::git_index_stage_t`
+#[doc(alias = "git_index_stage_t")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(i32)]
 pub enum Stage {
@@ -1593,7 +1619,8 @@ impl<'a> IndexRef<'a> {
     /// let _ = path;
     /// ```
     ///
-    /// Wraps: `git_index_path`
+    /// Wraps `fn::git_index_path`
+    #[doc(alias = "git_index_path")]
     #[must_use]
     pub fn path(&self) -> Option<&'a CStr> {
         // SAFETY: the handle keeps the index live for `'a`; the routine reads the path
@@ -1607,7 +1634,8 @@ impl<'a> IndexRef<'a> {
     /// The version the index is written in: 2, 3 or 4. An index starts at 2 and takes
     /// the version of each index file it reads.
     ///
-    /// Wraps: `git_index_version`
+    /// Wraps `fn::git_index_version`
+    #[doc(alias = "git_index_version")]
     #[must_use]
     pub fn version(&self) -> u32 {
         // SAFETY: a live index; the routine only reads its version field, despite its
@@ -1637,13 +1665,14 @@ impl<'a> IndexRef<'a> {
     ///
     /// [`ErrorCode::Locked`]: crate::libgit2::src::util::errors::ErrorCode::Locked
     ///
-    /// Wraps: `git_index_write`
+    /// Wraps `fn::git_index_write`
     ///
     /// # Errors
     ///
     /// Fails, with libgit2's error, for an in-memory index ("the index is in-memory
     /// only", code `-1`), when the lock file exists ([`ErrorCode::Locked`]) and when
     /// the file cannot be written.
+    #[doc(alias = "git_index_write")]
     pub fn write(&self) -> Result<(), RepositoryError> {
         self.racy_paths_parsable()?;
         // SAFETY: a live index used on this thread only: libgit2 counts a reference for
@@ -1658,13 +1687,14 @@ impl<'a> IndexRef<'a> {
     ///
     /// [`RepositoryRef::index`]: crate::libgit2::src::libgit2::repository::RepositoryRef::index
     ///
-    /// Wraps: `git_index_write_tree`
+    /// Wraps `fn::git_index_write_tree`
     ///
     /// # Errors
     ///
     /// Fails, with a `GIT_ERROR_INDEX` error (code `-1`), for an index no repository
     /// owns: every index built by [`Index::new`] or [`Index::open`] (a repository's
     /// own, which [`RepositoryRef::index`] lends as an [`IndexArc`], has an owner).
+    #[doc(alias = "git_index_write_tree")]
     pub fn write_tree(&self) -> Result<Oid, RepositoryError> {
         // SAFETY: a live index; the routine reads the repository the index's count
         // names as its owner, NULL or a live repository (libgit2 clears it when the
@@ -1699,7 +1729,7 @@ impl<'a> IndexRef<'a> {
     ///
     /// [`ErrorCode::Unmerged`]: crate::libgit2::src::util::errors::ErrorCode::Unmerged
     ///
-    /// Wraps: `git_index_write_tree_to`
+    /// Wraps `fn::git_index_write_tree_to`
     ///
     /// # Errors
     ///
@@ -1707,6 +1737,7 @@ impl<'a> IndexRef<'a> {
     /// libgit2's error when an entry is not a valid tree entry (an invalid mode or
     /// name, a zero id, an object `repo` does not have, of the type the mode wants)
     /// or a tree cannot be written.
+    #[doc(alias = "git_index_write_tree_to")]
     pub fn write_tree_to(&self, repo: RepositoryRef<'_>) -> Result<Oid, RepositoryError> {
         self.tree_writable(repo)?;
         let mut id = Oid::zeroed();
@@ -1737,13 +1768,14 @@ impl IndexMut<'_> {
     ///
     /// [`ErrorCode::Generic`]: crate::libgit2::src::util::errors::ErrorCode::Generic
     ///
-    /// Wraps: `git_index_read`
+    /// Wraps `fn::git_index_read`
     ///
     /// # Errors
     ///
     /// Fails, with a `GIT_ERROR_INDEX` error, for an in-memory index ("the index is
     /// in-memory only", code `-1`), when the file cannot be read or is not a valid
     /// index; a failed parse leaves the index cleared.
+    #[doc(alias = "git_index_read")]
     pub fn read(&mut self, force: bool) -> Result<(), RepositoryError> {
         // SAFETY: the exclusive handle excludes every borrow of the index's entries,
         // which the read may free; the path is the index's own.
@@ -1753,12 +1785,13 @@ impl IndexMut<'_> {
     /// Sets the version the index is written in: 2, 3 or 4. Writing version 2 may
     /// still produce a version 3 file, when an entry needs the extended flags.
     ///
-    /// Wraps: `git_index_set_version`
+    /// Wraps `fn::git_index_set_version`
     ///
     /// # Errors
     ///
     /// Fails, with a `GIT_ERROR_INDEX` error ("invalid version number", code `-1`), for
     /// another version, leaving the index's unchanged.
+    #[doc(alias = "git_index_set_version")]
     pub fn set_version(&mut self, version: u32) -> Result<(), RepositoryError> {
         // SAFETY: a live index, written through the exclusive handle.
         status(unsafe { ffi::git_index_set_version(self.as_mut_ptr(), version) })
@@ -1772,13 +1805,14 @@ impl IndexMut<'_> {
     /// `core.symlinks` from the repository owning the index, leaving each capability whose setting
     /// it cannot read as it was.
     ///
-    /// Wraps: `git_index_set_caps`
+    /// Wraps `fn::git_index_set_caps`
     ///
     /// # Errors
     ///
     /// It fails, with a `GIT_ERROR_INDEX` error (code `-1`), for an index no repository owns,
     /// leaving the capabilities unchanged; an index reached through this exclusive handle has no
     /// owner, since a repository's index is shared ([`IndexArc`]).
+    #[doc(alias = "git_index_set_caps")]
     pub fn set_caps(&mut self, caps: CapabilitySetting) -> Result<(), RepositoryError> {
         // SAFETY: a live index, written through the exclusive handle, which excludes
         // any borrow of the entries the re-sort reorders; the value is three named bits
@@ -1798,12 +1832,13 @@ impl IndexMut<'_> {
     ///
     /// [`ErrorCode::NotFound`]: crate::libgit2::src::util::errors::ErrorCode::NotFound
     ///
-    /// Wraps: `git_index_remove`
+    /// Wraps `fn::git_index_remove`
     ///
     /// # Errors
     ///
     /// Fails with [`ErrorCode::NotFound`] (and a `GIT_ERROR_INDEX` error) when there is
     /// no such entry.
+    #[doc(alias = "git_index_remove")]
     pub fn remove(&mut self, path: &CStr, stage: Stage) -> Result<(), RepositoryError> {
         let stage = match stage {
             // Without an entry at `path`, libgit2 reports the wildcard as not found, and
@@ -1827,12 +1862,13 @@ impl IndexMut<'_> {
     /// moving its stage 1-3 entries to the resolve-undo records. Neither missing is an
     /// error.
     ///
-    /// Wraps: `git_index_remove_bypath`
+    /// Wraps `fn::git_index_remove_bypath`
     ///
     /// # Errors
     ///
     /// Fails with libgit2's error for an invalid path, or when it runs out of memory moving the
     /// conflict's entries.
+    #[doc(alias = "git_index_remove_bypath")]
     pub fn remove_bypath(&mut self, path: &CStr) -> Result<(), RepositoryError> {
         // SAFETY: the exclusive handle excludes every borrow of the entries freed or
         // moved; `path` is a non-NULL NUL-terminated string, read for the call.
@@ -1842,7 +1878,7 @@ impl IndexMut<'_> {
     /// Removes every entry at `stage` under the directory `dir` (`dir` and a `/`,
     /// which is added when missing; the empty `dir` is the whole index).
     ///
-    /// Wraps: `git_index_remove_directory`
+    /// Wraps `fn::git_index_remove_directory`
     ///
     /// # Errors
     ///
@@ -1851,6 +1887,7 @@ impl IndexMut<'_> {
     /// it would remove nothing and report success.
     ///
     /// Fails, otherwise, with libgit2's error for an invalid directory.
+    #[doc(alias = "git_index_remove_directory")]
     pub fn remove_directory(&mut self, dir: &CStr, stage: Stage) -> Result<(), RepositoryError> {
         if stage == Stage::Any {
             set(
@@ -1896,7 +1933,7 @@ impl IndexMut<'_> {
     /// let _ = index.as_mut().remove_all(StrArrayView::default().as_ref(), Some(&mut callback));
     /// ```
     ///
-    /// Wraps: `git_index_remove_all`
+    /// Wraps `fn::git_index_remove_all`
     ///
     /// # Errors
     ///
@@ -1906,6 +1943,7 @@ impl IndexMut<'_> {
     ///
     /// Fails, as well, with the callback's negative result as its code when the callback stops the
     /// scan, and with libgit2's error for an invalid pattern.
+    #[doc(alias = "git_index_remove_all")]
     pub fn remove_all(
         &mut self,
         pathspec: StrArrayRef<'_>,
@@ -1942,13 +1980,14 @@ impl IndexMut<'_> {
     /// A pathspec mixing empty and non-empty patterns is refused as
     /// [`remove_all`](Self::remove_all) refuses it.
     ///
-    /// Wraps: `git_index_update_all`
+    /// Wraps `fn::git_index_update_all`
     ///
     /// # Errors
     ///
     /// Fails, with a `GIT_ERROR_INDEX` error (code `-1`), for an index no repository
     /// owns, before the callback runs. An index reached through this exclusive handle
     /// has no owner, since a repository's index is shared ([`IndexArc`]).
+    #[doc(alias = "git_index_update_all")]
     pub fn update_all(
         &mut self,
         pathspec: StrArrayRef<'_>,
@@ -1990,8 +2029,6 @@ impl IndexMut<'_> {
 /// fn send<T: Send>() {}
 /// send::<Conflict<'static>>();
 /// ```
-///
-/// Handwritten
 #[derive(Clone, Copy, Debug)]
 pub struct Conflict<'a> {
     /// The common ancestor's entry, stage 1.
@@ -2078,7 +2115,8 @@ impl IndexMut<'_> {
     /// let _ = index.as_ref().entry(0);
     /// ```
     ///
-    /// Wraps: `git_index_get_byindex`
+    /// Wraps `fn::git_index_get_byindex`
+    #[doc(alias = "git_index_get_byindex")]
     #[must_use]
     pub fn entry(&self, position: usize) -> Option<IndexEntryRef<'_, '_>> {
         let index = self.as_ref().as_ptr().cast_mut();
@@ -2099,7 +2137,8 @@ impl IndexMut<'_> {
     /// the wildcard's `-1` to the two stage bits of its lookup key
     /// (`GIT_INDEX_ENTRY_STAGE_SET`), so it finds only the stage 3 entry.
     ///
-    /// Wraps: `git_index_get_bypath`
+    /// Wraps `fn::git_index_get_bypath`
+    #[doc(alias = "git_index_get_bypath")]
     #[must_use]
     pub fn entry_by_path(&self, path: &CStr, stage: Stage) -> Option<IndexEntryRef<'_, '_>> {
         const STAGES: [Stage; 4] = [Stage::Normal, Stage::Ancestor, Stage::Ours, Stage::Theirs];
@@ -2122,7 +2161,8 @@ impl IndexMut<'_> {
     /// index's [`Capabilities::IGNORE_CASE`] says. Borrowing is as for
     /// [`entry`](Self::entry).
     ///
-    /// Wraps: `git_index_conflict_get`
+    /// Wraps `fn::git_index_conflict_get`
+    #[doc(alias = "git_index_conflict_get")]
     #[must_use]
     pub fn conflict(&self, path: &CStr) -> Option<Conflict<'_>> {
         let (index, path) = (self.as_ref().as_ptr().cast_mut(), path.as_ptr());
@@ -2162,7 +2202,7 @@ impl IndexMut<'_> {
     /// (see [`IndexRef::has_owner`]), so through the safe API alone the index has no
     /// owner, and no id is looked up.
     ///
-    /// Wraps: `git_index_add`
+    /// Wraps `fn::git_index_add`
     ///
     /// # Errors
     ///
@@ -2171,6 +2211,7 @@ impl IndexMut<'_> {
     /// [`FileMode::Commit`], and for a path an index cannot hold (`".git/config"`,
     /// `"../a"`; the empty path is accepted, as libgit2 accepts it); with libgit2's error
     /// for an id the owning repository does not have.
+    #[doc(alias = "git_index_add")]
     pub fn add(&mut self, entry: IndexEntryRef<'_, '_>) -> Result<(), RepositoryError> {
         self.as_ref().insertable(&[entry])?;
         // SAFETY: the exclusive handle excludes every borrow of the entry replaced, whose
@@ -2196,7 +2237,7 @@ impl IndexMut<'_> {
     /// refusal precedes libgit2's check of the path. Any other such entry fails with
     /// libgit2's own error, as above.
     ///
-    /// Wraps: `git_index_add_from_buffer`
+    /// Wraps `fn::git_index_add_from_buffer`
     ///
     /// # Errors
     ///
@@ -2206,6 +2247,7 @@ impl IndexMut<'_> {
     /// [`FileMode::Blob`], [`FileMode::BlobExecutable`] and [`FileMode::Link`]; for
     /// `data` longer than `u32::MAX` bytes; and for a path as [`add`](Self::add) fails
     /// it. Fails with libgit2's error when the blob cannot be written.
+    #[doc(alias = "git_index_add_from_buffer")]
     pub fn add_from_buffer(
         &mut self,
         entry: IndexEntryRef<'_, '_>,
@@ -2250,7 +2292,7 @@ impl IndexMut<'_> {
     ///
     /// The ids are checked as for [`add`](Self::add).
     ///
-    /// Wraps: `git_index_conflict_add`
+    /// Wraps `fn::git_index_conflict_add`
     ///
     /// # Errors
     ///
@@ -2259,6 +2301,7 @@ impl IndexMut<'_> {
     /// when a side cannot be added after the normal entries were removed, which leaves
     /// the sides before it added. Refuses the ids [`add`](Self::add) refuses, changing
     /// nothing.
+    #[doc(alias = "git_index_conflict_add")]
     pub fn add_conflict(
         &mut self,
         ancestor: Option<IndexEntryRef<'_, '_>>,
@@ -2293,7 +2336,7 @@ impl IndexMut<'_> {
     /// (`git_index_read_tree`). That includes a refused name or a missing subtree after
     /// a blob, and running out of memory filling its path table.
     ///
-    /// Wraps: `git_index_read_tree`
+    /// Wraps `fn::git_index_read_tree`
     ///
     /// # Errors
     ///
@@ -2301,6 +2344,7 @@ impl IndexMut<'_> {
     /// `GIT_ERROR_INDEX` error (code `-1`) for a tree entry whose name an index cannot
     /// hold (`.git`); the index is then left as it was, but for its tree cache, which is
     /// dropped.
+    #[doc(alias = "git_index_read_tree")]
     pub fn read_tree(&mut self, tree: TreeRef<'_, '_>) -> Result<(), RepositoryError> {
         // SAFETY: the exclusive handle excludes every borrow of the entries freed; `tree`
         // is a live tree, walked for the call with its repository, used on this thread,
@@ -2315,8 +2359,8 @@ impl IndexMut<'_> {
 /// This is the C enum's integer layout, not the narrower `git_index_entry.flags`
 /// field. It owns no resources and requires no foreign allocation or teardown.
 ///
-/// Wraps: `git_index_entry_flag_t`
-/// Handwritten
+/// Wraps `ty::git_index_entry_flag_t`
+#[doc(alias = "git_index_entry_flag_t")]
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct EntryFlags(ffi::git_index_entry_flag_t);
@@ -2385,7 +2429,8 @@ define_ctype!(
     /// Neither this type nor its handles/owner is `Send` or `Sync`: the retained
     /// index can still be accessed by other C owners without a common lock.
     ///
-    /// Wraps: git_index_iterator
+    /// Wraps `ty::git_index_iterator`
+    #[doc(alias = "git_index_iterator")]
     IndexIterator,
     IndexIteratorRef,
     IndexIteratorMut,
@@ -2393,12 +2438,12 @@ define_ctype!(
 );
 
 /// Releases the snapshot vector, its counted index reference, and the iterator.
-///
-/// Wraps: `git_index_iterator_free`
 #[derive(Clone, Copy, Debug, Default)]
 pub struct IndexIteratorFree;
 
 impl_cdrop!(
+    /// Wraps `fn::git_index_iterator_free`
+    #[doc(alias = "git_index_iterator_free")]
     IndexIteratorFree,
     IndexIterator,
     ffi::git_index_iterator_free
@@ -2452,7 +2497,7 @@ impl IndexIterator {
     /// let _ = IndexIterator::new(&index);
     /// ```
     ///
-    /// Wraps: `git_index_iterator_new`
+    /// Wraps `fn::git_index_iterator_new`
     ///
     /// # Errors
     ///
@@ -2461,6 +2506,7 @@ impl IndexIterator {
     /// # Panics
     ///
     /// Panics, with `successful iterator constructor`, only if libgit2 breaks its contract.
+    #[doc(alias = "git_index_iterator_new")]
     pub fn new(index: &IndexArc) -> Result<IndexIteratorBox, ErrorBuf> {
         let mut out = ptr::null_mut();
         // SAFETY: the arc keeps a live index and the runtime alive; it has no
@@ -2503,7 +2549,8 @@ impl Iterator for IndexIteratorMut<'_> {
     /// A copy of the snapshot's next entry; `None` once every entry was returned, and
     /// after.
     ///
-    /// Wraps: `git_index_iterator_next`
+    /// Wraps `fn::git_index_iterator_next`
+    #[doc(alias = "git_index_iterator_next")]
     fn next(&mut self) -> Option<IndexEntryBuf> {
         let mut entry = ptr::null();
         // SAFETY: the exclusive handle addresses a live iterator, whose position libgit2
@@ -2550,8 +2597,8 @@ impl Iterator for IndexIteratorMut<'_> {
 /// let cursor = ConflictIterator::new(index.as_ref());
 /// ```
 ///
-/// Wraps: `git_index_conflict_iterator`
-/// Handwritten
+/// Wraps `ty::git_index_conflict_iterator`
+#[doc(alias = "git_index_conflict_iterator")]
 #[repr(transparent)]
 pub struct ConflictIterator<'index>(
     ffi::git_index_conflict_iterator,
@@ -2559,8 +2606,6 @@ pub struct ConflictIterator<'index>(
 );
 
 /// Copyable shared handle to a conflict cursor; it cannot advance the cursor.
-///
-/// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct ConflictIteratorRef<'a, 'index>(CBorrowedPtr<'a, ConflictIterator<'index>>);
@@ -2581,8 +2626,6 @@ pub struct ConflictIteratorRef<'a, 'index>(CBorrowedPtr<'a, ConflictIterator<'in
 /// use libgit2::libgit2::src::libgit2::index::ConflictIteratorMut;
 /// fn shorten<'a, 'i>(m: ConflictIteratorMut<'a, 'static>) -> ConflictIteratorMut<'a, 'i> { m }
 /// ```
-///
-/// Handwritten
 #[repr(transparent)]
 pub struct ConflictIteratorMut<'a, 'index>(
     ConflictIteratorRef<'a, 'index>,
@@ -2627,15 +2670,14 @@ impl<'index> ConflictIteratorMut<'_, 'index> {
 }
 
 /// Frees the cursor allocation only; the borrowed index is not released.
-///
-/// Wraps: `git_index_conflict_iterator_free`
-/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ConflictIteratorFree;
 
 // SAFETY: each live initialized cursor from git_index_conflict_iterator_new is
 // released once by git_index_conflict_iterator_free; there are no clone policies.
 unsafe impl<'index> ffibox::CDrop<ConflictIterator<'index>> for ConflictIteratorFree {
+    /// Wraps `fn::git_index_conflict_iterator_free`
+    #[doc(alias = "git_index_conflict_iterator_free")]
     unsafe fn c_drop(&self, cursor: NonNull<ConflictIterator<'index>>) {
         // SAFETY: the caller transfers the sole C allocation; the wrapper is
         // layout-compatible. C frees only the cursor and retains nothing.
@@ -2670,11 +2712,12 @@ impl<'index> ConflictIterator<'index> {
     /// Creates a cursor positioned before the first conflict. The index must have a sole owner: an
     /// `IndexArc` cannot provide this exclusive handle.
     ///
-    /// Wraps: `git_index_conflict_iterator_new`
+    /// Wraps `fn::git_index_conflict_iterator_new`
     ///
     /// # Errors
     ///
     /// Returns the C allocation error without retaining a borrow on failure.
+    #[doc(alias = "git_index_conflict_iterator_new")]
     pub fn new(mut index: IndexMut<'index>) -> Result<ConflictIteratorBox<'index>, ErrorBuf> {
         let mut out = ptr::null_mut();
         // SAFETY: index is live and exclusively borrowed for the returned
@@ -2723,7 +2766,8 @@ impl<'index> Iterator for ConflictIteratorMut<'_, 'index> {
 
     /// The next conflict; `None` once every conflict was returned, and after.
     ///
-    /// Wraps: `git_index_conflict_next`
+    /// Wraps `fn::git_index_conflict_next`
+    #[doc(alias = "git_index_conflict_next")]
     fn next(&mut self) -> Option<Conflict<'index>> {
         let mut slots = [ptr::null(); 3];
         let [ancestor, ours, theirs] = &mut slots;
@@ -2746,8 +2790,8 @@ impl<'index> Iterator for ConflictIteratorMut<'_, 'index> {
 /// scalar value, not a C allocation; copying it copies no pointers or resources.
 /// The entry field itself is `u16`; the enum's ABI representation is preserved.
 ///
-/// Wraps: `git_index_entry_extended_flag_t`
-/// Handwritten
+/// Wraps `ty::git_index_entry_extended_flag_t`
+#[doc(alias = "git_index_entry_extended_flag_t")]
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct EntryExtendedFlags(ffi::git_index_entry_extended_flag_t);
@@ -2832,7 +2876,8 @@ define_ctype!(
     /// let _ = shared.seconds();
     /// ```
     ///
-    /// Wraps: git_index_time
+    /// Wraps `ty::git_index_time`
+    #[doc(alias = "git_index_time")]
     IndexTime,
     IndexTimeRef,
     IndexTimeMut,
@@ -2869,7 +2914,8 @@ impl Clone for IndexTime {
 impl IndexTimeRef<'_> {
     /// The signed, truncated seconds component.
     ///
-    /// Field: `git_index_time.seconds`
+    /// Wraps `fld::git_index_time.seconds`
+    #[doc(alias = "git_index_time.seconds")]
     #[must_use]
     pub fn seconds(&self) -> i32 {
         // SAFETY: the shared handle's pointer addresses a live `git_index_time`; the projection
@@ -2881,7 +2927,8 @@ impl IndexTimeRef<'_> {
 
     /// The raw nanoseconds component, without normalization.
     ///
-    /// Field: `git_index_time.nanoseconds`
+    /// Wraps `fld::git_index_time.nanoseconds`
+    #[doc(alias = "git_index_time.nanoseconds")]
     #[must_use]
     pub fn nanoseconds(&self) -> u32 {
         // SAFETY: the shared handle's pointer addresses a live `git_index_time`; the projection
@@ -2900,6 +2947,9 @@ impl IndexTimeRef<'_> {
 
 impl IndexTimeMut<'_> {
     /// Replaces the seconds component.
+    ///
+    /// Wraps `fld::git_index_time.seconds`
+    #[doc(alias = "git_index_time.seconds")]
     pub fn set_seconds(&mut self, seconds: i32) {
         // SAFETY: the exclusive handle's pointer addresses a live `git_index_time`; the projection
         // forms no reference to it.
@@ -2910,6 +2960,9 @@ impl IndexTimeMut<'_> {
     }
 
     /// Replaces the nanoseconds component; all u32 values are preserved.
+    ///
+    /// Wraps `fld::git_index_time.nanoseconds`
+    #[doc(alias = "git_index_time.nanoseconds")]
     pub fn set_nanoseconds(&mut self, nanoseconds: u32) {
         // SAFETY: the exclusive handle's pointer addresses a live `git_index_time`; the projection
         // forms no reference to it.
@@ -3013,8 +3066,8 @@ impl IndexTimeMut<'_> {
 ///
 /// Equal when every field is, the id by its type and bytes and the path by its contents.
 ///
-/// Wraps: `git_index_entry`
-/// Handwritten
+/// Wraps `ty::git_index_entry`
+#[doc(alias = "git_index_entry")]
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct IndexEntry<'p>(ffi::git_index_entry, PhantomData<&'p CStr>);
@@ -3037,8 +3090,6 @@ pub struct IndexEntry<'p>(ffi::git_index_entry, PhantomData<&'p CStr>);
 /// }
 /// let _ = id.raw_kind();
 /// ```
-///
-/// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct IndexEntryRef<'a, 'p>(CBorrowedPtr<'a, IndexEntry<'p>>);
@@ -3060,8 +3111,6 @@ pub struct IndexEntryRef<'a, 'p>(CBorrowedPtr<'a, IndexEntry<'p>>);
 /// handle.ctime_mut().set_seconds(1);
 /// let _ = ctime.seconds();
 /// ```
-///
-/// Handwritten
 #[repr(transparent)]
 pub struct IndexEntryMut<'a, 'p>(
     IndexEntryRef<'a, 'p>,
@@ -3186,7 +3235,8 @@ impl<'a, 'p> IndexEntryRef<'a, 'p> {
     /// When the file's metadata last changed, truncated to 32-bit seconds; in place, for
     /// as long as the entry is borrowed.
     ///
-    /// Field: `git_index_entry.ctime`
+    /// Wraps `fld::git_index_entry.ctime`
+    #[doc(alias = "git_index_entry.ctime")]
     #[must_use]
     #[expect(
         clippy::missing_panics_doc,
@@ -3206,7 +3256,8 @@ impl<'a, 'p> IndexEntryRef<'a, 'p> {
     /// When the file's contents last changed, truncated to 32-bit seconds; in place, for
     /// as long as the entry is borrowed.
     ///
-    /// Field: `git_index_entry.mtime`
+    /// Wraps `fld::git_index_entry.mtime`
+    #[doc(alias = "git_index_entry.mtime")]
     #[must_use]
     #[expect(
         clippy::missing_panics_doc,
@@ -3225,7 +3276,8 @@ impl<'a, 'p> IndexEntryRef<'a, 'p> {
     /// holding the file (`st_dev`), but libgit2 stores the file's `st_rdev` when it
     /// stats it (adding by path, updating), which is 0 for a regular file.
     ///
-    /// Field: `git_index_entry.dev`
+    /// Wraps `fld::git_index_entry.dev`
+    #[doc(alias = "git_index_entry.dev")]
     #[must_use]
     pub fn dev(&self) -> u32 {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -3238,7 +3290,8 @@ impl<'a, 'p> IndexEntryRef<'a, 'p> {
 
     /// The file's inode number, truncated to 32 bits.
     ///
-    /// Field: `git_index_entry.ino`
+    /// Wraps `fld::git_index_entry.ino`
+    #[doc(alias = "git_index_entry.ino")]
     #[must_use]
     pub fn ino(&self) -> u32 {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -3253,7 +3306,8 @@ impl<'a, 'p> IndexEntryRef<'a, 'p> {
     /// directory, but whatever an index file it read spelled, and a tree's raw mode
     /// for the entries `git_index_read_tree` adds (git's legacy `0100664`, say).
     ///
-    /// Field: `git_index_entry.mode`
+    /// Wraps `fld::git_index_entry.mode`
+    #[doc(alias = "git_index_entry.mode")]
     #[must_use]
     pub fn mode(&self) -> u32 {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -3266,7 +3320,8 @@ impl<'a, 'p> IndexEntryRef<'a, 'p> {
     /// The entry's mode as a [`FileMode`]; `None` for a mode without a variant, which
     /// [`mode`](Self::mode) has.
     ///
-    /// Field: `git_index_entry.mode`
+    /// Wraps `fld::git_index_entry.mode`
+    #[doc(alias = "git_index_entry.mode")]
     #[must_use]
     pub fn filemode(&self) -> Option<FileMode> {
         FileMode::from_raw(self.mode())
@@ -3274,7 +3329,8 @@ impl<'a, 'p> IndexEntryRef<'a, 'p> {
 
     /// The file owner's user id, truncated to 32 bits.
     ///
-    /// Field: `git_index_entry.uid`
+    /// Wraps `fld::git_index_entry.uid`
+    #[doc(alias = "git_index_entry.uid")]
     #[must_use]
     pub fn uid(&self) -> u32 {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -3286,7 +3342,8 @@ impl<'a, 'p> IndexEntryRef<'a, 'p> {
 
     /// The file owner's group id, truncated to 32 bits.
     ///
-    /// Field: `git_index_entry.gid`
+    /// Wraps `fld::git_index_entry.gid`
+    #[doc(alias = "git_index_entry.gid")]
     #[must_use]
     pub fn gid(&self) -> u32 {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -3298,7 +3355,8 @@ impl<'a, 'p> IndexEntryRef<'a, 'p> {
 
     /// The file's size in bytes, truncated to 32 bits.
     ///
-    /// Field: `git_index_entry.file_size`
+    /// Wraps `fld::git_index_entry.file_size`
+    #[doc(alias = "git_index_entry.file_size")]
     #[must_use]
     pub fn file_size(&self) -> u32 {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -3311,7 +3369,8 @@ impl<'a, 'p> IndexEntryRef<'a, 'p> {
     /// The id of the blob (or a submodule's commit) the entry names, in place, for as
     /// long as the entry is borrowed.
     ///
-    /// Field: `git_index_entry.id`
+    /// Wraps `fld::git_index_entry.id`
+    #[doc(alias = "git_index_entry.id")]
     #[must_use]
     #[expect(
         clippy::missing_panics_doc,
@@ -3331,7 +3390,8 @@ impl<'a, 'p> IndexEntryRef<'a, 'p> {
     /// the stage (`GIT_INDEX_ENTRY_STAGEMASK`, decoded by [`stage`](Self::stage)), and
     /// [`EntryFlags::EXTENDED`] and [`EntryFlags::VALID`].
     ///
-    /// Field: `git_index_entry.flags`
+    /// Wraps `fld::git_index_entry.flags`
+    #[doc(alias = "git_index_entry.flags")]
     #[must_use]
     pub fn flags(&self) -> EntryFlags {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -3345,7 +3405,8 @@ impl<'a, 'p> IndexEntryRef<'a, 'p> {
     /// The entry's 16 extended flag bits, widened: those written to disk
     /// ([`EntryExtendedFlags::ON_DISK`]) and those libgit2 only keeps in memory.
     ///
-    /// Field: `git_index_entry.flags_extended`
+    /// Wraps `fld::git_index_entry.flags_extended`
+    #[doc(alias = "git_index_entry.flags_extended")]
     #[must_use]
     pub fn flags_extended(&self) -> EntryExtendedFlags {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -3363,8 +3424,10 @@ impl<'a, 'p> IndexEntryRef<'a, 'p> {
     /// `git_index_entry_stage` is the exported function form of the same macro; the two
     /// read the same bits, so this one method stands for both.
     ///
-    /// Wraps: `GIT_INDEX_ENTRY_STAGE`
-    /// Wraps: `git_index_entry_stage`
+    /// Wraps `fn::GIT_INDEX_ENTRY_STAGE`
+    /// Wraps `fn::git_index_entry_stage`
+    #[doc(alias = "GIT_INDEX_ENTRY_STAGE")]
+    #[doc(alias = "git_index_entry_stage")]
     #[must_use]
     #[expect(
         clippy::missing_panics_doc,
@@ -3379,7 +3442,8 @@ impl<'a, 'p> IndexEntryRef<'a, 'p> {
 
     /// The file's path, relative to the working directory, borrowed for `'p`.
     ///
-    /// Field: `git_index_entry.path`
+    /// Wraps `fld::git_index_entry.path`
+    #[doc(alias = "git_index_entry.path")]
     #[must_use]
     pub fn path(&self) -> &'p CStr {
         let p = self.as_ptr();
@@ -3412,7 +3476,8 @@ impl<'a, 'p> IndexEntryRef<'a, 'p> {
 
     /// Whether the entry is a conflict side: of a stage other than [`Stage::Normal`].
     ///
-    /// Wraps: `git_index_entry_is_conflict`
+    /// Wraps `fn::git_index_entry_is_conflict`
+    #[doc(alias = "git_index_entry_is_conflict")]
     #[must_use]
     pub fn is_conflict(&self) -> bool {
         // SAFETY: the handle addresses a live entry, whose flags libgit2 only reads.
@@ -3454,7 +3519,8 @@ impl<'p> IndexEntryMut<'_, 'p> {
 
     /// The metadata change time, in place, borrowed exclusively to change it.
     ///
-    /// Field: `git_index_entry.ctime`
+    /// Wraps `fld::git_index_entry.ctime`
+    #[doc(alias = "git_index_entry.ctime")]
     #[expect(
         clippy::missing_panics_doc,
         reason = "cannot panic: a field is never NULL"
@@ -3472,7 +3538,8 @@ impl<'p> IndexEntryMut<'_, 'p> {
 
     /// Replaces the metadata change time with a copy of `time`.
     ///
-    /// Field: `git_index_entry.ctime`
+    /// Wraps `fld::git_index_entry.ctime`
+    #[doc(alias = "git_index_entry.ctime")]
     pub fn set_ctime(&mut self, time: IndexTimeRef<'_>) {
         let mut ctime = self.ctime_mut();
         ctime.set_seconds(time.seconds());
@@ -3481,7 +3548,8 @@ impl<'p> IndexEntryMut<'_, 'p> {
 
     /// The contents change time, in place, borrowed exclusively to change it.
     ///
-    /// Field: `git_index_entry.mtime`
+    /// Wraps `fld::git_index_entry.mtime`
+    #[doc(alias = "git_index_entry.mtime")]
     #[expect(
         clippy::missing_panics_doc,
         reason = "cannot panic: a field is never NULL"
@@ -3497,7 +3565,8 @@ impl<'p> IndexEntryMut<'_, 'p> {
 
     /// Replaces the contents change time with a copy of `time`.
     ///
-    /// Field: `git_index_entry.mtime`
+    /// Wraps `fld::git_index_entry.mtime`
+    #[doc(alias = "git_index_entry.mtime")]
     pub fn set_mtime(&mut self, time: IndexTimeRef<'_>) {
         let mut mtime = self.mtime_mut();
         mtime.set_seconds(time.seconds());
@@ -3506,7 +3575,8 @@ impl<'p> IndexEntryMut<'_, 'p> {
 
     /// Replaces the device number.
     ///
-    /// Field: `git_index_entry.dev`
+    /// Wraps `fld::git_index_entry.dev`
+    #[doc(alias = "git_index_entry.dev")]
     pub fn set_dev(&mut self, dev: u32) {
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
         // forms no reference to it.
@@ -3518,7 +3588,8 @@ impl<'p> IndexEntryMut<'_, 'p> {
 
     /// Replaces the inode number.
     ///
-    /// Field: `git_index_entry.ino`
+    /// Wraps `fld::git_index_entry.ino`
+    #[doc(alias = "git_index_entry.ino")]
     pub fn set_ino(&mut self, ino: u32) {
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
         // forms no reference to it.
@@ -3530,7 +3601,8 @@ impl<'p> IndexEntryMut<'_, 'p> {
     /// Replaces the mode with any value, named or not; the index routines refuse an
     /// entry whose mode is not one of the insertable [`FileMode`]s.
     ///
-    /// Field: `git_index_entry.mode`
+    /// Wraps `fld::git_index_entry.mode`
+    #[doc(alias = "git_index_entry.mode")]
     pub fn set_mode(&mut self, mode: u32) {
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
         // forms no reference to it.
@@ -3541,14 +3613,16 @@ impl<'p> IndexEntryMut<'_, 'p> {
 
     /// Replaces the mode with `filemode`'s value.
     ///
-    /// Field: `git_index_entry.mode`
+    /// Wraps `fld::git_index_entry.mode`
+    #[doc(alias = "git_index_entry.mode")]
     pub fn set_filemode(&mut self, filemode: FileMode) {
         self.set_mode(filemode.raw());
     }
 
     /// Replaces the owner's user id.
     ///
-    /// Field: `git_index_entry.uid`
+    /// Wraps `fld::git_index_entry.uid`
+    #[doc(alias = "git_index_entry.uid")]
     pub fn set_uid(&mut self, uid: u32) {
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
         // forms no reference to it.
@@ -3559,7 +3633,8 @@ impl<'p> IndexEntryMut<'_, 'p> {
 
     /// Replaces the owner's group id.
     ///
-    /// Field: `git_index_entry.gid`
+    /// Wraps `fld::git_index_entry.gid`
+    #[doc(alias = "git_index_entry.gid")]
     pub fn set_gid(&mut self, gid: u32) {
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
         // forms no reference to it.
@@ -3570,7 +3645,8 @@ impl<'p> IndexEntryMut<'_, 'p> {
 
     /// Replaces the file size.
     ///
-    /// Field: `git_index_entry.file_size`
+    /// Wraps `fld::git_index_entry.file_size`
+    #[doc(alias = "git_index_entry.file_size")]
     pub fn set_file_size(&mut self, file_size: u32) {
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
         // forms no reference to it.
@@ -3581,7 +3657,8 @@ impl<'p> IndexEntryMut<'_, 'p> {
 
     /// The id the entry names, in place, borrowed exclusively to change it.
     ///
-    /// Field: `git_index_entry.id`
+    /// Wraps `fld::git_index_entry.id`
+    #[doc(alias = "git_index_entry.id")]
     #[expect(
         clippy::missing_panics_doc,
         reason = "cannot panic: a field is never NULL"
@@ -3598,7 +3675,8 @@ impl<'p> IndexEntryMut<'_, 'p> {
 
     /// Replaces the id with a copy of `id`, type and all 32 bytes.
     ///
-    /// Field: `git_index_entry.id`
+    /// Wraps `fld::git_index_entry.id`
+    #[doc(alias = "git_index_entry.id")]
     pub fn set_id(&mut self, id: OidRef<'_>) {
         let id = copy_id(id);
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
@@ -3611,11 +3689,12 @@ impl<'p> IndexEntryMut<'_, 'p> {
 
     /// Replaces the 16 flag bits with `flags`, stage and path-length bits included.
     ///
-    /// Field: `git_index_entry.flags`
+    /// Wraps `fld::git_index_entry.flags`
     ///
     /// # Errors
     ///
     /// Fails, changing nothing, when `flags` has a bit above the field's 16.
+    #[doc(alias = "git_index_entry.flags")]
     pub fn set_flags(&mut self, flags: EntryFlags) -> Result<(), TryFromIntError> {
         let raw = u16::try_from(flags.bits())?;
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
@@ -3641,13 +3720,14 @@ impl<'p> IndexEntryMut<'_, 'p> {
     /// entry.as_ref().set_stage(Stage::Ours);
     /// ```
     ///
-    /// Wraps: `GIT_INDEX_ENTRY_STAGE_SET`
+    /// Wraps `fn::GIT_INDEX_ENTRY_STAGE_SET`
     ///
     /// # Errors
     ///
     /// Fails, changing nothing, for [`Stage::Any`], which is not a stage an entry can be
     /// at: the C macro would keep the low two bits of its `-1`, storing
     /// [`Stage::Theirs`].
+    #[doc(alias = "GIT_INDEX_ENTRY_STAGE_SET")]
     pub fn set_stage(&mut self, stage: Stage) -> Result<(), AnyStageError> {
         if stage == Stage::Any {
             return Err(AnyStageError);
@@ -3660,11 +3740,12 @@ impl<'p> IndexEntryMut<'_, 'p> {
 
     /// Replaces the 16 extended flag bits with `flags`, the in-memory ones included.
     ///
-    /// Field: `git_index_entry.flags_extended`
+    /// Wraps `fld::git_index_entry.flags_extended`
     ///
     /// # Errors
     ///
     /// Fails, changing nothing, when `flags` has a bit above the field's 16.
+    #[doc(alias = "git_index_entry.flags_extended")]
     pub fn set_flags_extended(&mut self, flags: EntryExtendedFlags) -> Result<(), TryFromIntError> {
         let raw = u16::try_from(flags.bits())?;
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
@@ -3678,7 +3759,8 @@ impl<'p> IndexEntryMut<'_, 'p> {
     /// Replaces the path with `path`, borrowed for `'p`. The previous path is only
     /// borrowed, so nothing is released.
     ///
-    /// Field: `git_index_entry.path`
+    /// Wraps `fld::git_index_entry.path`
+    #[doc(alias = "git_index_entry.path")]
     pub fn set_path(&mut self, path: &'p CStr) {
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
         // forms no reference to it.
@@ -3736,8 +3818,6 @@ impl fmt::Debug for IndexEntryMut<'_, '_> {
 /// drop(buf);
 /// let _ = path;
 /// ```
-///
-/// Handwritten
 pub struct IndexEntryBuf {
     /// The entry, whose `path` is a `CString` given up with `CString::into_raw` (so that
     /// no move of an owner retags it), never written through and reclaimed on drop.
@@ -3768,6 +3848,9 @@ impl IndexEntryBuf {
     }
 
     /// The entry's path, this value's own copy; as `self.as_ref().path()`.
+    ///
+    /// Wraps `fld::git_index_entry.path`
+    #[doc(alias = "git_index_entry.path")]
     #[must_use]
     pub fn path(&self) -> &CStr {
         self.as_ref().path()
@@ -3817,7 +3900,8 @@ define_ctype!(
     /// they must survive index mutation. The layout and exclusive handle are only
     /// for internal FFI interoperability, not independently constructed owners.
     ///
-    /// Wraps: git_index_name_entry
+    /// Wraps `ty::git_index_name_entry`
+    #[doc(alias = "git_index_name_entry")]
     NameEntry,
     NameEntryRef,
     NameEntryMut,
@@ -3827,7 +3911,8 @@ define_ctype!(
 impl<'a> NameEntryRef<'a> {
     /// The original path, absent for a conflict without an ancestor name.
     ///
-    /// Field: `git_index_name_entry.ancestor`
+    /// Wraps `fld::git_index_name_entry.ancestor`
+    #[doc(alias = "git_index_name_entry.ancestor")]
     #[must_use]
     pub fn ancestor(&self) -> Option<&'a CStr> {
         // SAFETY: the shared handle's pointer addresses a live, initialised name entry; the
@@ -3842,7 +3927,8 @@ impl<'a> NameEntryRef<'a> {
 
     /// Our path, or `None` when this side has no name.
     ///
-    /// Field: `git_index_name_entry.ours`
+    /// Wraps `fld::git_index_name_entry.ours`
+    #[doc(alias = "git_index_name_entry.ours")]
     #[must_use]
     pub fn ours(&self) -> Option<&'a CStr> {
         // SAFETY: the shared handle's pointer addresses a live, initialised name entry; the
@@ -3857,7 +3943,8 @@ impl<'a> NameEntryRef<'a> {
 
     /// Their path, or `None` when this side has no name.
     ///
-    /// Field: `git_index_name_entry.theirs`
+    /// Wraps `fld::git_index_name_entry.theirs`
+    #[doc(alias = "git_index_name_entry.theirs")]
     #[must_use]
     pub fn theirs(&self) -> Option<&'a CStr> {
         // SAFETY: the shared handle's pointer addresses a live, initialised name entry; the
@@ -3892,7 +3979,8 @@ define_ctype!(
     /// });
     /// ```
     ///
-    /// Wraps: git_index_reuc_entry
+    /// Wraps `ty::git_index_reuc_entry`
+    #[doc(alias = "git_index_reuc_entry")]
     ReucEntry,
     ReucEntryRef,
     ReucEntryMut,
@@ -3926,7 +4014,8 @@ impl<'a> ReucEntryRef<'a> {
     /// The resolved path. Never NULL: libgit2 stores it in the record's own
     /// allocation, so it lives exactly as long as the record.
     ///
-    /// Field: `git_index_reuc_entry.path`
+    /// Wraps `fld::git_index_reuc_entry.path`
+    #[doc(alias = "git_index_reuc_entry.path")]
     #[must_use]
     pub fn path(&self) -> &'a CStr {
         // SAFETY: the shared handle's pointer addresses a live, index-owned entry; the projection
@@ -3942,7 +4031,8 @@ impl<'a> ReucEntryRef<'a> {
     /// The ancestor's, our and their stored modes, in that order; 0 marks a side
     /// that did not exist.
     ///
-    /// Field: `git_index_reuc_entry.mode`
+    /// Wraps `fld::git_index_reuc_entry.mode`
+    #[doc(alias = "git_index_reuc_entry.mode")]
     #[must_use]
     pub fn modes(&self) -> [u32; 3] {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -3956,7 +4046,8 @@ impl<'a> ReucEntryRef<'a> {
     /// The ancestor's, our and their ids, in that order, borrowed in place. A slot
     /// whose mode is 0 carries no id: libgit2 leaves it all zero (typeless).
     ///
-    /// Field: `git_index_reuc_entry.oid`
+    /// Wraps `fld::git_index_reuc_entry.oid`
+    #[doc(alias = "git_index_reuc_entry.oid")]
     #[must_use]
     pub fn ids(&self) -> CSlice<'a, Oid> {
         // SAFETY: the shared handle's pointer addresses a live, index-owned entry; the projection
@@ -3970,18 +4061,33 @@ impl<'a> ReucEntryRef<'a> {
     }
 
     /// The common ancestor's side, or `None` when it had no such file.
+    ///
+    /// Wraps `fld::git_index_reuc_entry.mode`
+    /// Wraps `fld::git_index_reuc_entry.oid`
+    #[doc(alias = "git_index_reuc_entry.mode")]
+    #[doc(alias = "git_index_reuc_entry.oid")]
     #[must_use]
     pub fn ancestor(&self) -> Option<ReucSide<'a>> {
         self.side(0)
     }
 
     /// Our side, or `None` when it had no such file.
+    ///
+    /// Wraps `fld::git_index_reuc_entry.mode`
+    /// Wraps `fld::git_index_reuc_entry.oid`
+    #[doc(alias = "git_index_reuc_entry.mode")]
+    #[doc(alias = "git_index_reuc_entry.oid")]
     #[must_use]
     pub fn ours(&self) -> Option<ReucSide<'a>> {
         self.side(1)
     }
 
     /// Their side, or `None` when it had no such file.
+    ///
+    /// Wraps `fld::git_index_reuc_entry.mode`
+    /// Wraps `fld::git_index_reuc_entry.oid`
+    #[doc(alias = "git_index_reuc_entry.mode")]
+    #[doc(alias = "git_index_reuc_entry.oid")]
     #[must_use]
     pub fn theirs(&self) -> Option<ReucSide<'a>> {
         self.side(2)
@@ -4019,7 +4125,8 @@ impl fmt::Debug for ReucEntryRef<'_> {
 impl IndexRef<'_> {
     /// Number of rename-conflict records currently held by the index.
     ///
-    /// Wraps: `git_index_name_entrycount`
+    /// Wraps `fn::git_index_name_entrycount`
+    #[doc(alias = "git_index_name_entrycount")]
     #[must_use]
     pub fn name_entry_count(&self) -> usize {
         // SAFETY: the index is live; this C routine only reads its vector length
@@ -4033,12 +4140,13 @@ impl IndexMut<'_> {
     /// names must be present, as required by C. Empty strings and non-UTF-8 names
     /// are preserved in memory; no pointer into the inputs is retained.
     ///
-    /// Wraps: `git_index_name_add`
+    /// Wraps `fn::git_index_name_add`
     ///
     /// # Errors
     ///
     /// Fails with a `GIT_ERROR_INVALID` error when fewer than two names are present, and with
     /// libgit2's error when it runs out of memory.
+    #[doc(alias = "git_index_name_add")]
     pub fn add_name(
         &mut self,
         ancestor: Option<&CStr>,
@@ -4089,7 +4197,8 @@ impl IndexMut<'_> {
     /// let _ = name.to_bytes();
     /// ```
     ///
-    /// Wraps: `git_index_name_get_byindex`
+    /// Wraps `fn::git_index_name_get_byindex`
+    #[doc(alias = "git_index_name_get_byindex")]
     pub fn name_entry(&mut self, position: usize) -> Option<NameEntryRef<'_>> {
         // SAFETY: the exclusive index borrow permits sorting and excludes clearing, reloading, and
         // freeing until the returned borrow ends.
@@ -4131,7 +4240,8 @@ impl IndexMut<'_> {
     /// let _ = index.as_ref().reuc_entry(0);
     /// ```
     ///
-    /// Wraps: `git_index_reuc_get_byindex`
+    /// Wraps `fn::git_index_reuc_get_byindex`
+    #[doc(alias = "git_index_reuc_get_byindex")]
     #[must_use]
     pub fn reuc_entry(&self, position: usize) -> Option<ReucEntryRef<'_>> {
         // SAFETY: the exclusive handle proves no other holder can change the index, and the shared
@@ -4147,7 +4257,8 @@ impl IndexMut<'_> {
     /// Find the REUC record for `path`, or `None`. The search folds case when the
     /// index ignores case. Borrowing is as for [`reuc_entry`](Self::reuc_entry).
     ///
-    /// Wraps: `git_index_reuc_get_bypath`
+    /// Wraps `fn::git_index_reuc_get_bypath`
+    #[doc(alias = "git_index_reuc_get_bypath")]
     #[must_use]
     pub fn reuc_entry_by_path(&self, path: &CStr) -> Option<ReucEntryRef<'_>> {
         // SAFETY: as in `reuc_entry`; C returns before searching unless the vector is flagged
@@ -4163,12 +4274,13 @@ impl IndexMut<'_> {
     /// Destroy all rename-conflict records and their strings, leaving the index
     /// reusable. Existing record/string borrows must end before this call.
     ///
-    /// Wraps: `git_index_name_clear`
+    /// Wraps `fn::git_index_name_clear`
     ///
     /// # Errors
     ///
     /// Fails with libgit2's error should the index refuse to clear its records; libgit2 reports no
     /// other failure.
+    #[doc(alias = "git_index_name_clear")]
     pub fn clear_names(&mut self) -> Result<(), ErrorBuf> {
         // SAFETY: exclusive access excludes every borrowed NAME entry; C disposes
         // the owned entries and resets the vector, retaining the index itself.
@@ -4187,7 +4299,8 @@ impl IndexRef<'_> {
     /// Number of resolve-undo (REUC) records currently held by the index: the stages
     /// of conflicts resolved since the index was read.
     ///
-    /// Wraps: `git_index_reuc_entrycount`
+    /// Wraps `fn::git_index_reuc_entrycount`
+    #[doc(alias = "git_index_reuc_entrycount")]
     #[must_use]
     pub fn reuc_entry_count(&self) -> usize {
         // SAFETY: the index is live; this C routine only reads its vector length
@@ -4206,11 +4319,12 @@ impl IndexMut<'_> {
     /// mode is 0 is recorded as absent, without its id. Empty and non-UTF-8 paths are
     /// kept as given.
     ///
-    /// Wraps: `git_index_reuc_add`
+    /// Wraps `fn::git_index_reuc_add`
     ///
     /// # Errors
     ///
     /// Fails, with libgit2's error, only when it runs out of memory.
+    #[doc(alias = "git_index_reuc_add")]
     pub fn add_reuc(
         &mut self,
         path: &CStr,
@@ -4243,7 +4357,8 @@ impl IndexMut<'_> {
     ///
     /// Requires exclusive index access because C sorts the REUC vector lazily.
     ///
-    /// Wraps: `git_index_reuc_find`
+    /// Wraps `fn::git_index_reuc_find`
+    #[doc(alias = "git_index_reuc_find")]
     pub fn find_reuc(&mut self, path: &CStr) -> Option<usize> {
         let mut position = 0;
         let index = self.as_mut_ptr();
@@ -4255,13 +4370,14 @@ impl IndexMut<'_> {
 
     /// Removes and frees the resolve-undo record at `position`.
     ///
-    /// Wraps: `git_index_reuc_remove`
+    /// Wraps `fn::git_index_reuc_remove`
     ///
     /// # Errors
     ///
     /// Fails for a position past the last record. libgit2 then returns
     /// `GIT_ENOTFOUND` without an error of its own; the error is a `GIT_ERROR_INDEX`
     /// one describing the position.
+    #[doc(alias = "git_index_reuc_remove")]
     pub fn remove_reuc(&mut self, position: usize) -> Result<(), ErrorBuf> {
         clear();
         // SAFETY: the exclusive handle excludes every borrow of the record freed; C
@@ -4282,12 +4398,13 @@ impl IndexMut<'_> {
     /// Destroy all resolve-undo records, leaving the index reusable. Existing record
     /// borrows must end before this call.
     ///
-    /// Wraps: `git_index_reuc_clear`
+    /// Wraps `fn::git_index_reuc_clear`
     ///
     /// # Errors
     ///
     /// Fails with libgit2's error should the index refuse to clear its records; libgit2 reports no
     /// other failure.
+    #[doc(alias = "git_index_reuc_clear")]
     pub fn clear_reuc(&mut self) -> Result<(), ErrorBuf> {
         // SAFETY: exclusive access excludes every borrowed REUC record; C frees the
         // owned records and resets the vector, retaining the index itself.
