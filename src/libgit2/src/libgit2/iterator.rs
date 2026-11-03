@@ -33,19 +33,17 @@ use crate::libgit2::src::libgit2::notes::NoteIteratorFree;
 /// send::<NoteIteratorBox<'static>>();
 /// ```
 ///
-/// Wraps: `git_iterator`
-/// Handwritten
+/// Wraps `ty::git_iterator`
+#[doc(alias = "git_iterator")]
 #[repr(transparent)]
 pub struct NoteIterator<'r>(ffi::git_note_iterator, PhantomData<(*const (), &'r ())>);
 
 /// Shared handle; the public C API has no read-only iterator operations.
-/// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct NoteIteratorRef<'a, 'r>(CBorrowedPtr<'a, NoteIterator<'r>>);
 
 /// Exclusive handle, required for stateful traversal.
-/// Handwritten
 #[repr(transparent)]
 pub struct NoteIteratorMut<'a, 'r>(
     NoteIteratorRef<'a, 'r>,
