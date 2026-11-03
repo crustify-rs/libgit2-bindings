@@ -12050,7 +12050,7 @@
       "link_unit": "libgit2",
       "module": "src/libgit2/odb.c",
       "foundational": false,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
           89,
@@ -12074,7 +12074,7 @@
         {
           "index": 0,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_odb_expand_id",
@@ -12098,12 +12098,14 @@
               "home": "src/libgit2/src/libgit2/odb.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "603bf0085542a88fba6379f21a64073266f6df5c"
+          ]
         },
         {
           "index": 1,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_odb_stream",
@@ -12136,12 +12138,14 @@
               "home": "src/libgit2/src/libgit2/odb.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "3f43c106d582faf37b65768c5ede4907b3bee779"
+          ]
         },
         {
           "index": 2,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_odb_add_disk_alternate",
@@ -12298,7 +12302,9 @@
               "home": "src/libgit2/src/libgit2/odb.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "b043039e2016c76238d9ced0e5400571fd20aee0"
+          ]
         }
       ]
     },

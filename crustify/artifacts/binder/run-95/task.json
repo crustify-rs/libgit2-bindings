@@ -1,0 +1,44 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_odb_stream",
+      "defined_in": "include/git2/odb_backend.h",
+      "kind": "type",
+      "field_anchors": [
+        "mode",
+        "read",
+        "write",
+        "free",
+        "oid_type",
+        "backend",
+        "received_bytes",
+        "finalize_write",
+        "declared_size",
+        "hash_ctx"
+      ],
+      "home": "src/libgit2/src/libgit2/odb.rs"
+    },
+    {
+      "name": "git_odb_writepack",
+      "defined_in": "include/git2/odb_backend.h",
+      "kind": "type",
+      "field_anchors": [
+        "append",
+        "commit",
+        "free",
+        "backend"
+      ],
+      "home": "src/libgit2/src/libgit2/odb.rs"
+    }
+  ],
+  "wave": 176,
+  "batch": 1,
+  "link_unit": "libgit2",
+  "module": "src/libgit2/odb.c",
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-176",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api",
+  "instructions": "instructions.md"
+}

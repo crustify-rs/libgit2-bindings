@@ -1,0 +1,1486 @@
+{
+ "sessions": [
+  {
+   "source": "/work/.crustify/transcripts/6b1173db-429a-46a4-a2fa-aabb9ac8e79d.jsonl",
+   "provider": "openrouter",
+   "model": "anthropic/claude-opus-5.5",
+   "started_at": "2026-11-03T20:39:46+00:00",
+   "ended_at": "2026-11-03T21:40:53+00:00",
+   "duration_ms": 3667230,
+   "request_count": 207,
+   "tokens": {
+    "input_tokens": 414,
+    "output_tokens": 179346,
+    "cache_read_tokens": 62249522,
+    "cache_write_tokens": 866877,
+    "cache_write_1h_tokens": 0
+   },
+   "cost_usd": 20.372865,
+   "requests": [
+    {
+     "input_tokens": 2,
+     "output_tokens": 228,
+     "cache_read_tokens": 1564,
+     "cache_write_tokens": 36108,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 146,
+     "cache_read_tokens": 37672,
+     "cache_write_tokens": 2272,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 205,
+     "cache_read_tokens": 39944,
+     "cache_write_tokens": 6295,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 191,
+     "cache_read_tokens": 46239,
+     "cache_write_tokens": 11671,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 243,
+     "cache_read_tokens": 57910,
+     "cache_write_tokens": 325,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 247,
+     "cache_read_tokens": 58235,
+     "cache_write_tokens": 2841,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 407,
+     "cache_read_tokens": 61076,
+     "cache_write_tokens": 1392,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 586,
+     "cache_read_tokens": 62468,
+     "cache_write_tokens": 4704,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 211,
+     "cache_read_tokens": 67172,
+     "cache_write_tokens": 2300,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 496,
+     "cache_read_tokens": 69472,
+     "cache_write_tokens": 5880,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 538,
+     "cache_read_tokens": 75352,
+     "cache_write_tokens": 3439,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 428,
+     "cache_read_tokens": 78791,
+     "cache_write_tokens": 582,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 356,
+     "cache_read_tokens": 79373,
+     "cache_write_tokens": 1080,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 1114,
+     "cache_read_tokens": 80453,
+     "cache_write_tokens": 522,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 160,
+     "cache_read_tokens": 80975,
+     "cache_write_tokens": 1395,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 133,
+     "cache_read_tokens": 82370,
+     "cache_write_tokens": 11312,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 221,
+     "cache_read_tokens": 93682,
+     "cache_write_tokens": 7016,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 186,
+     "cache_read_tokens": 100698,
+     "cache_write_tokens": 757,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 147,
+     "cache_read_tokens": 101455,
+     "cache_write_tokens": 678,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 300,
+     "cache_read_tokens": 102133,
+     "cache_write_tokens": 11150,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 371,
+     "cache_read_tokens": 113283,
+     "cache_write_tokens": 15607,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 603,
+     "cache_read_tokens": 128890,
+     "cache_write_tokens": 4867,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 172,
+     "cache_read_tokens": 133757,
+     "cache_write_tokens": 1836,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 227,
+     "cache_read_tokens": 135593,
+     "cache_write_tokens": 3079,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 352,
+     "cache_read_tokens": 138672,
+     "cache_write_tokens": 2444,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 812,
+     "cache_read_tokens": 141116,
+     "cache_write_tokens": 4922,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 1808,
+     "cache_read_tokens": 146038,
+     "cache_write_tokens": 6201,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 138,
+     "cache_read_tokens": 152239,
+     "cache_write_tokens": 3826,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 420,
+     "cache_read_tokens": 156065,
+     "cache_write_tokens": 4067,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 310,
+     "cache_read_tokens": 160132,
+     "cache_write_tokens": 921,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 436,
+     "cache_read_tokens": 161053,
+     "cache_write_tokens": 981,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 173,
+     "cache_read_tokens": 162034,
+     "cache_write_tokens": 4993,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 553,
+     "cache_read_tokens": 167027,
+     "cache_write_tokens": 6817,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 737,
+     "cache_read_tokens": 173844,
+     "cache_write_tokens": 3200,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 198,
+     "cache_read_tokens": 177044,
+     "cache_write_tokens": 836,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 1394,
+     "cache_read_tokens": 177880,
+     "cache_write_tokens": 986,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 1788,
+     "cache_read_tokens": 178866,
+     "cache_write_tokens": 3231,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 263,
+     "cache_read_tokens": 182097,
+     "cache_write_tokens": 2494,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 537,
+     "cache_read_tokens": 184591,
+     "cache_write_tokens": 1324,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 1853,
+     "cache_read_tokens": 185915,
+     "cache_write_tokens": 1388,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 481,
+     "cache_read_tokens": 187303,
+     "cache_write_tokens": 2967,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 5275,
+     "cache_read_tokens": 190270,
+     "cache_write_tokens": 998,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 2094,
+     "cache_read_tokens": 191268,
+     "cache_write_tokens": 6661,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 4276,
+     "cache_read_tokens": 197929,
+     "cache_write_tokens": 2202,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 2460,
+     "cache_read_tokens": 200131,
+     "cache_write_tokens": 5415,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 107,
+     "cache_read_tokens": 205546,
+     "cache_write_tokens": 2923,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 199,
+     "cache_read_tokens": 208469,
+     "cache_write_tokens": 2743,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 608,
+     "cache_read_tokens": 211212,
+     "cache_write_tokens": 1372,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 108,
+     "cache_read_tokens": 212584,
+     "cache_write_tokens": 1419,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 1256,
+     "cache_read_tokens": 214003,
+     "cache_write_tokens": 1209,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 169,
+     "cache_read_tokens": 215212,
+     "cache_write_tokens": 1271,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 178,
+     "cache_read_tokens": 216483,
+     "cache_write_tokens": 478,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 219,
+     "cache_read_tokens": 216961,
+     "cache_write_tokens": 1552,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 804,
+     "cache_read_tokens": 218513,
+     "cache_write_tokens": 1358,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 4552,
+     "cache_read_tokens": 219871,
+     "cache_write_tokens": 3634,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 528,
+     "cache_read_tokens": 223505,
+     "cache_write_tokens": 4778,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 619,
+     "cache_read_tokens": 228283,
+     "cache_write_tokens": 1269,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 617,
+     "cache_read_tokens": 229552,
+     "cache_write_tokens": 818,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 263,
+     "cache_read_tokens": 230370,
+     "cache_write_tokens": 1067,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 278,
+     "cache_read_tokens": 231437,
+     "cache_write_tokens": 311,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 3762,
+     "cache_read_tokens": 231748,
+     "cache_write_tokens": 1837,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 270,
+     "cache_read_tokens": 233585,
+     "cache_write_tokens": 6300,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 331,
+     "cache_read_tokens": 239885,
+     "cache_write_tokens": 1050,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 625,
+     "cache_read_tokens": 240935,
+     "cache_write_tokens": 2125,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 512,
+     "cache_read_tokens": 243060,
+     "cache_write_tokens": 1877,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 5663,
+     "cache_read_tokens": 244937,
+     "cache_write_tokens": 960,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 16040,
+     "cache_read_tokens": 245897,
+     "cache_write_tokens": 6443,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 177,
+     "cache_read_tokens": 252340,
+     "cache_write_tokens": 16055,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 194,
+     "cache_read_tokens": 268395,
+     "cache_write_tokens": 408,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 783,
+     "cache_read_tokens": 268803,
+     "cache_write_tokens": 1371,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 1731,
+     "cache_read_tokens": 270174,
+     "cache_write_tokens": 798,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 806,
+     "cache_read_tokens": 270972,
+     "cache_write_tokens": 1838,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 1025,
+     "cache_read_tokens": 272810,
+     "cache_write_tokens": 1227,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 877,
+     "cache_read_tokens": 274037,
+     "cache_write_tokens": 3246,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 2561,
+     "cache_read_tokens": 277283,
+     "cache_write_tokens": 4882,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 669,
+     "cache_read_tokens": 282165,
+     "cache_write_tokens": 4204,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 175,
+     "cache_read_tokens": 286369,
+     "cache_write_tokens": 1157,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 1204,
+     "cache_read_tokens": 287526,
+     "cache_write_tokens": 525,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 437,
+     "cache_read_tokens": 288051,
+     "cache_write_tokens": 1851,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 470,
+     "cache_read_tokens": 289902,
+     "cache_write_tokens": 1371,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 575,
+     "cache_read_tokens": 291273,
+     "cache_write_tokens": 832,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 261,
+     "cache_read_tokens": 292105,
+     "cache_write_tokens": 1035,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 1459,
+     "cache_read_tokens": 293140,
+     "cache_write_tokens": 3169,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 5182,
+     "cache_read_tokens": 296309,
+     "cache_write_tokens": 1476,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 657,
+     "cache_read_tokens": 297785,
+     "cache_write_tokens": 5197,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 425,
+     "cache_read_tokens": 302982,
+     "cache_write_tokens": 664,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 254,
+     "cache_read_tokens": 303646,
+     "cache_write_tokens": 870,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 577,
+     "cache_read_tokens": 304516,
+     "cache_write_tokens": 744,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 3983,
+     "cache_read_tokens": 305260,
+     "cache_write_tokens": 1550,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 382,
+     "cache_read_tokens": 306810,
+     "cache_write_tokens": 4932,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 235,
+     "cache_read_tokens": 311742,
+     "cache_write_tokens": 992,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 8439,
+     "cache_read_tokens": 312734,
+     "cache_write_tokens": 317,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 103,
+     "cache_read_tokens": 313051,
+     "cache_write_tokens": 8462,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 3627,
+     "cache_read_tokens": 321513,
+     "cache_write_tokens": 594,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 807,
+     "cache_read_tokens": 322107,
+     "cache_write_tokens": 3876,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 342,
+     "cache_read_tokens": 325983,
+     "cache_write_tokens": 1090,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 954,
+     "cache_read_tokens": 327073,
+     "cache_write_tokens": 357,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 4637,
+     "cache_read_tokens": 327430,
+     "cache_write_tokens": 1850,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 412,
+     "cache_read_tokens": 329280,
+     "cache_write_tokens": 4694,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 327,
+     "cache_read_tokens": 333974,
+     "cache_write_tokens": 960,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 249,
+     "cache_read_tokens": 334934,
+     "cache_write_tokens": 376,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 231,
+     "cache_read_tokens": 335310,
+     "cache_write_tokens": 504,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 157,
+     "cache_read_tokens": 335814,
+     "cache_write_tokens": 1231,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 504,
+     "cache_read_tokens": 337045,
+     "cache_write_tokens": 611,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 303,
+     "cache_read_tokens": 337656,
+     "cache_write_tokens": 969,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 848,
+     "cache_read_tokens": 338625,
+     "cache_write_tokens": 1740,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 139,
+     "cache_read_tokens": 340365,
+     "cache_write_tokens": 1216,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 158,
+     "cache_read_tokens": 341581,
+     "cache_write_tokens": 681,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 457,
+     "cache_read_tokens": 342262,
+     "cache_write_tokens": 354,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 148,
+     "cache_read_tokens": 342616,
+     "cache_write_tokens": 1298,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 380,
+     "cache_read_tokens": 343914,
+     "cache_write_tokens": 477,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 786,
+     "cache_read_tokens": 344391,
+     "cache_write_tokens": 675,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 411,
+     "cache_read_tokens": 345066,
+     "cache_write_tokens": 1555,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 362,
+     "cache_read_tokens": 346621,
+     "cache_write_tokens": 607,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 111,
+     "cache_read_tokens": 347228,
+     "cache_write_tokens": 467,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 875,
+     "cache_read_tokens": 347695,
+     "cache_write_tokens": 1780,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 704,
+     "cache_read_tokens": 349475,
+     "cache_write_tokens": 1019,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 832,
+     "cache_read_tokens": 350494,
+     "cache_write_tokens": 1123,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 171,
+     "cache_read_tokens": 351617,
+     "cache_write_tokens": 1629,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 409,
+     "cache_read_tokens": 353246,
+     "cache_write_tokens": 798,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 216,
+     "cache_read_tokens": 354044,
+     "cache_write_tokens": 1439,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 694,
+     "cache_read_tokens": 355483,
+     "cache_write_tokens": 1572,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 1377,
+     "cache_read_tokens": 357055,
+     "cache_write_tokens": 1270,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 1485,
+     "cache_read_tokens": 358325,
+     "cache_write_tokens": 1699,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 244,
+     "cache_read_tokens": 360024,
+     "cache_write_tokens": 1925,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 225,
+     "cache_read_tokens": 361949,
+     "cache_write_tokens": 769,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 349,
+     "cache_read_tokens": 362718,
+     "cache_write_tokens": 364,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 627,
+     "cache_read_tokens": 363082,
+     "cache_write_tokens": 642,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 284,
+     "cache_read_tokens": 363724,
+     "cache_write_tokens": 855,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 817,
+     "cache_read_tokens": 364579,
+     "cache_write_tokens": 449,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 98,
+     "cache_read_tokens": 365028,
+     "cache_write_tokens": 828,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 402,
+     "cache_read_tokens": 365856,
+     "cache_write_tokens": 167,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 636,
+     "cache_read_tokens": 366023,
+     "cache_write_tokens": 477,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 228,
+     "cache_read_tokens": 366500,
+     "cache_write_tokens": 1356,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 275,
+     "cache_read_tokens": 367856,
+     "cache_write_tokens": 8796,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 148,
+     "cache_read_tokens": 376652,
+     "cache_write_tokens": 321,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 909,
+     "cache_read_tokens": 376973,
+     "cache_write_tokens": 1241,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 239,
+     "cache_read_tokens": 378214,
+     "cache_write_tokens": 1110,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 203,
+     "cache_read_tokens": 379324,
+     "cache_write_tokens": 328,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 560,
+     "cache_read_tokens": 379652,
+     "cache_write_tokens": 398,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 732,
+     "cache_read_tokens": 380050,
+     "cache_write_tokens": 653,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 358,
+     "cache_read_tokens": 380703,
+     "cache_write_tokens": 905,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 176,
+     "cache_read_tokens": 381608,
+     "cache_write_tokens": 958,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 258,
+     "cache_read_tokens": 382566,
+     "cache_write_tokens": 633,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 534,
+     "cache_read_tokens": 383199,
+     "cache_write_tokens": 1266,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 361,
+     "cache_read_tokens": 384465,
+     "cache_write_tokens": 5947,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 182,
+     "cache_read_tokens": 390412,
+     "cache_write_tokens": 389,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 1263,
+     "cache_read_tokens": 390801,
+     "cache_write_tokens": 939,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 403,
+     "cache_read_tokens": 391740,
+     "cache_write_tokens": 1900,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 508,
+     "cache_read_tokens": 393640,
+     "cache_write_tokens": 1237,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 159,
+     "cache_read_tokens": 394877,
+     "cache_write_tokens": 847,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 905,
+     "cache_read_tokens": 395724,
+     "cache_write_tokens": 342,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 1095,
+     "cache_read_tokens": 396066,
+     "cache_write_tokens": 1200,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 1388,
+     "cache_read_tokens": 397266,
+     "cache_write_tokens": 3039,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 221,
+     "cache_read_tokens": 400305,
+     "cache_write_tokens": 1512,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 376,
+     "cache_read_tokens": 401817,
+     "cache_write_tokens": 440,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 492,
+     "cache_read_tokens": 402257,
+     "cache_write_tokens": 873,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 2019,
+     "cache_read_tokens": 403130,
+     "cache_write_tokens": 509,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 1347,
+     "cache_read_tokens": 403639,
+     "cache_write_tokens": 2400,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 474,
+     "cache_read_tokens": 406039,
+     "cache_write_tokens": 1604,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 1113,
+     "cache_read_tokens": 407643,
+     "cache_write_tokens": 820,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 341,
+     "cache_read_tokens": 408463,
+     "cache_write_tokens": 1184,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 344,
+     "cache_read_tokens": 409647,
+     "cache_write_tokens": 526,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 398,
+     "cache_read_tokens": 1564,
+     "cache_write_tokens": 409015,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 337,
+     "cache_read_tokens": 410579,
+     "cache_write_tokens": 755,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 341,
+     "cache_read_tokens": 411334,
+     "cache_write_tokens": 823,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 871,
+     "cache_read_tokens": 412157,
+     "cache_write_tokens": 960,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 305,
+     "cache_read_tokens": 413117,
+     "cache_write_tokens": 913,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 428,
+     "cache_read_tokens": 414030,
+     "cache_write_tokens": 701,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 416,
+     "cache_read_tokens": 414731,
+     "cache_write_tokens": 713,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 150,
+     "cache_read_tokens": 415444,
+     "cache_write_tokens": 564,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 102,
+     "cache_read_tokens": 416008,
+     "cache_write_tokens": 447,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 911,
+     "cache_read_tokens": 416455,
+     "cache_write_tokens": 1249,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 430,
+     "cache_read_tokens": 417704,
+     "cache_write_tokens": 2994,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 987,
+     "cache_read_tokens": 420698,
+     "cache_write_tokens": 1561,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 181,
+     "cache_read_tokens": 422259,
+     "cache_write_tokens": 1221,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 1951,
+     "cache_read_tokens": 423480,
+     "cache_write_tokens": 658,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 519,
+     "cache_read_tokens": 424138,
+     "cache_write_tokens": 2195,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 255,
+     "cache_read_tokens": 426333,
+     "cache_write_tokens": 1125,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 258,
+     "cache_read_tokens": 427458,
+     "cache_write_tokens": 569,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 195,
+     "cache_read_tokens": 428027,
+     "cache_write_tokens": 838,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 1250,
+     "cache_read_tokens": 428865,
+     "cache_write_tokens": 1265,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 949,
+     "cache_read_tokens": 430130,
+     "cache_write_tokens": 2223,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 395,
+     "cache_read_tokens": 432353,
+     "cache_write_tokens": 1180,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 809,
+     "cache_read_tokens": 433533,
+     "cache_write_tokens": 1871,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 481,
+     "cache_read_tokens": 435404,
+     "cache_write_tokens": 1708,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 793,
+     "cache_read_tokens": 437112,
+     "cache_write_tokens": 1334,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 1224,
+     "cache_read_tokens": 438446,
+     "cache_write_tokens": 1163,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 736,
+     "cache_read_tokens": 439609,
+     "cache_write_tokens": 1766,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 367,
+     "cache_read_tokens": 441375,
+     "cache_write_tokens": 1125,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 571,
+     "cache_read_tokens": 442500,
+     "cache_write_tokens": 449,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 543,
+     "cache_read_tokens": 442949,
+     "cache_write_tokens": 621,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 751,
+     "cache_read_tokens": 443570,
+     "cache_write_tokens": 823,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 752,
+     "cache_read_tokens": 444393,
+     "cache_write_tokens": 2012,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 1923,
+     "cache_read_tokens": 446405,
+     "cache_write_tokens": 1107,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 871,
+     "cache_read_tokens": 447512,
+     "cache_write_tokens": 2248,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 1617,
+     "cache_read_tokens": 449760,
+     "cache_write_tokens": 1771,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 518,
+     "cache_read_tokens": 451531,
+     "cache_write_tokens": 1659,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 470,
+     "cache_read_tokens": 453190,
+     "cache_write_tokens": 861,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 469,
+     "cache_read_tokens": 454051,
+     "cache_write_tokens": 771,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 319,
+     "cache_read_tokens": 454822,
+     "cache_write_tokens": 548,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 223,
+     "cache_read_tokens": 455370,
+     "cache_write_tokens": 452,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 844,
+     "cache_read_tokens": 455822,
+     "cache_write_tokens": 241,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 494,
+     "cache_read_tokens": 456063,
+     "cache_write_tokens": 1169,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 249,
+     "cache_read_tokens": 457232,
+     "cache_write_tokens": 1219,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 498,
+     "cache_read_tokens": 458451,
+     "cache_write_tokens": 375,
+     "cache_write_1h_tokens": 0
+    },
+    {
+     "input_tokens": 2,
+     "output_tokens": 2166,
+     "cache_read_tokens": 458826,
+     "cache_write_tokens": 1006,
+     "cache_write_1h_tokens": 0
+    }
+   ]
+  }
+ ],
+ "total": {
+  "sessions": 1,
+  "request_count": 207,
+  "tokens": {
+   "input_tokens": 414,
+   "output_tokens": 179346,
+   "cache_read_tokens": 62249522,
+   "cache_write_tokens": 866877,
+   "cache_write_1h_tokens": 0
+  },
+  "cost_usd": 20.372865,
+  "unpriced_sessions": 0,
+  "duration_ms": 3667230
+ }
+}

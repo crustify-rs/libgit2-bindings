@@ -1,0 +1,168 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_odb_add_disk_alternate",
+      "defined_in": "src/libgit2/odb.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "src/libgit2/src/libgit2/odb.rs"
+    },
+    {
+      "name": "git_odb_exists",
+      "defined_in": "src/libgit2/odb.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "src/libgit2/src/libgit2/odb.rs"
+    },
+    {
+      "name": "git_odb_exists_ext",
+      "defined_in": "src/libgit2/odb.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "src/libgit2/src/libgit2/odb.rs"
+    },
+    {
+      "name": "git_odb_exists_prefix",
+      "defined_in": "src/libgit2/odb.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "src/libgit2/src/libgit2/odb.rs"
+    },
+    {
+      "name": "git_odb_foreach_cb",
+      "defined_in": "include/git2/odb.h",
+      "kind": "callback",
+      "field_anchors": [],
+      "home": "src/libgit2/src/libgit2/odb.rs"
+    },
+    {
+      "name": "git_odb_free",
+      "defined_in": "src/libgit2/odb.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "src/libgit2/src/libgit2/odb.rs"
+    },
+    {
+      "name": "git_odb_new",
+      "defined_in": "src/libgit2/odb.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "src/libgit2/src/libgit2/odb.rs"
+    },
+    {
+      "name": "git_odb_num_backends",
+      "defined_in": "src/libgit2/odb.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "src/libgit2/src/libgit2/odb.rs"
+    },
+    {
+      "name": "git_odb_object_data",
+      "defined_in": "src/libgit2/odb.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "src/libgit2/src/libgit2/odb.rs"
+    },
+    {
+      "name": "git_odb_object_dup",
+      "defined_in": "src/libgit2/odb.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "src/libgit2/src/libgit2/odb.rs"
+    },
+    {
+      "name": "git_odb_object_free",
+      "defined_in": "src/libgit2/odb.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "src/libgit2/src/libgit2/odb.rs"
+    },
+    {
+      "name": "git_odb_object_id",
+      "defined_in": "src/libgit2/odb.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "src/libgit2/src/libgit2/odb.rs"
+    },
+    {
+      "name": "git_odb_object_size",
+      "defined_in": "src/libgit2/odb.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "src/libgit2/src/libgit2/odb.rs"
+    },
+    {
+      "name": "git_odb_object_type",
+      "defined_in": "src/libgit2/odb.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "src/libgit2/src/libgit2/odb.rs"
+    },
+    {
+      "name": "git_odb_open",
+      "defined_in": "src/libgit2/odb.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "src/libgit2/src/libgit2/odb.rs"
+    },
+    {
+      "name": "git_odb_read",
+      "defined_in": "src/libgit2/odb.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "src/libgit2/src/libgit2/odb.rs"
+    },
+    {
+      "name": "git_odb_read_header",
+      "defined_in": "src/libgit2/odb.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "src/libgit2/src/libgit2/odb.rs"
+    },
+    {
+      "name": "git_odb_read_prefix",
+      "defined_in": "src/libgit2/odb.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "src/libgit2/src/libgit2/odb.rs"
+    },
+    {
+      "name": "git_odb_refresh",
+      "defined_in": "src/libgit2/odb.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "src/libgit2/src/libgit2/odb.rs"
+    },
+    {
+      "name": "git_odb_set_commit_graph",
+      "defined_in": "src/libgit2/odb.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "src/libgit2/src/libgit2/odb.rs"
+    },
+    {
+      "name": "git_odb_write",
+      "defined_in": "src/libgit2/odb.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "src/libgit2/src/libgit2/odb.rs"
+    },
+    {
+      "name": "git_odb_write_multi_pack_index",
+      "defined_in": "src/libgit2/odb.c",
+      "kind": "symbol",
+      "field_anchors": [],
+      "home": "src/libgit2/src/libgit2/odb.rs"
+    }
+  ],
+  "wave": 176,
+  "batch": 2,
+  "link_unit": "libgit2",
+  "module": "src/libgit2/odb.c",
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-176",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api",
+  "instructions": "instructions.md"
+}
