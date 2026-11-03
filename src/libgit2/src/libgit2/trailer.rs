@@ -157,23 +157,19 @@ use crate::libgit2::src::util::errors::{ErrorBuf, last, runtime_pinned};
 /// `Copy`, `Send` and `Sync`, as a pair of `&'t CStr`s is: nothing writes through the
 /// strings, and only the exclusive handle writes the fields.
 ///
-/// Wraps: `git_message_trailer`
-/// Handwritten
+/// Wraps `ty::git_message_trailer`
+#[doc(alias = "git_message_trailer")]
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct MessageTrailer<'t>(ffi::git_message_trailer, PhantomData<&'t CStr>);
 
 /// Shared borrow of a [`MessageTrailer`]. `Copy`, like `&T`; the getters live here.
-///
-/// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct MessageTrailerRef<'a, 't>(CBorrowedPtr<'a, MessageTrailer<'t>>);
 
 /// Exclusive borrow of a [`MessageTrailer`]. Reaches the getters with
 /// [`as_ref`](Self::as_ref); the setters live here.
-///
-/// Handwritten
 #[repr(transparent)]
 pub struct MessageTrailerMut<'a, 't>(
     MessageTrailerRef<'a, 't>,
@@ -295,7 +291,8 @@ impl<'t> MessageTrailerRef<'_, 't> {
     /// The trailer's key, without the separator or the whitespace around it
     /// (`Signed-off-by`). Borrowed for `'t`, as the trailer holds it.
     ///
-    /// Field: `git_message_trailer.key`
+    /// Wraps `fld::git_message_trailer.key`
+    #[doc(alias = "git_message_trailer.key")]
     #[must_use]
     pub fn key(&self) -> &'t CStr {
         let p = self.as_ptr();
@@ -314,7 +311,8 @@ impl<'t> MessageTrailerRef<'_, 't> {
     /// continuation lines included with their newlines (`A U Thor <a@example.com>`).
     /// Borrowed for `'t`, as the trailer holds it.
     ///
-    /// Field: `git_message_trailer.value`
+    /// Wraps `fld::git_message_trailer.value`
+    #[doc(alias = "git_message_trailer.value")]
     #[must_use]
     pub fn value(&self) -> &'t CStr {
         let p = self.as_ptr();
@@ -352,7 +350,8 @@ impl<'t> MessageTrailerMut<'_, 't> {
     /// Replaces the key with `key`, borrowed for `'t`. The previous key is only
     /// borrowed, so nothing is released.
     ///
-    /// Field: `git_message_trailer.key`
+    /// Wraps `fld::git_message_trailer.key`
+    #[doc(alias = "git_message_trailer.key")]
     pub fn set_key(&mut self, key: &'t CStr) {
         let p = self.as_mut_ptr();
         // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
@@ -367,7 +366,8 @@ impl<'t> MessageTrailerMut<'_, 't> {
     /// Replaces the value with `value`, borrowed for `'t`. The previous value is only
     /// borrowed, so nothing is released.
     ///
-    /// Field: `git_message_trailer.value`
+    /// Wraps `fld::git_message_trailer.value`
+    #[doc(alias = "git_message_trailer.value")]
     pub fn set_value(&mut self, value: &'t CStr) {
         let p = self.as_mut_ptr();
         // SAFETY: `p` is the handle's pointer to the live object it borrows; the projection forms
@@ -461,7 +461,8 @@ define_ctype!(
     /// The owner and its handles are `Send` and `Sync` (see the
     /// [module docs](self#trailer-arrays)).
     ///
-    /// Wraps: git_message_trailer_array
+    /// Wraps `ty::git_message_trailer_array`
+    #[doc(alias = "git_message_trailer_array")]
     MessageTrailerArray,
     MessageTrailerArrayRef,
     MessageTrailerArrayMut,
@@ -507,9 +508,6 @@ const EMPTY: ffi::git_message_trailer_array = ffi::git_message_trailer_array {
 /// An empty array (both buffers NULL) is not passed to C: it owns nothing, and the call
 /// would be two `git__free(NULL)`, which read `git__allocator` without synchronisation
 /// against the first `git_libgit2_init` another thread may be running.
-///
-/// Wraps: `git_message_trailer_array_free`
-/// Handwritten
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MessageTrailerArrayFree;
 
@@ -520,6 +518,8 @@ pub struct MessageTrailerArrayFree;
 // contract; `new`, `take` and `clear` leave the empty array, which owns nothing and is
 // released without C; `set` only moves in another owner's array.
 unsafe impl CDispose<MessageTrailerArray> for MessageTrailerArrayFree {
+    /// Wraps `fn::git_message_trailer_array_free`
+    #[doc(alias = "git_message_trailer_array_free")]
     #[inline]
     unsafe fn c_dispose(&self, ptr: NonNull<MessageTrailerArray>) {
         let raw: *mut ffi::git_message_trailer_array = ptr.as_ptr().cast();
@@ -566,7 +566,7 @@ impl MessageTrailerArray {
     ///
     /// Pins the runtime first.
     ///
-    /// Wraps: `git_message_trailers`
+    /// Wraps `fn::git_message_trailers`
     ///
     /// # Errors
     ///
@@ -575,6 +575,7 @@ impl MessageTrailerArray {
     /// should that allocation fail, it writes the trailer through NULL and the process crashes,
     /// which only exhausting memory between the block's allocation and the buffer's can bring
     /// about.
+    #[doc(alias = "git_message_trailers")]
     pub fn parse(message: &CStr) -> Result<MessageTrailerArrayVal, ErrorBuf> {
         if !runtime_pinned() {
             return Err(last());
@@ -626,7 +627,8 @@ impl<'a> MessageTrailerArrayRef<'a> {
     /// The number of trailers; 0 without a trailer buffer, whatever `count` says, as
     /// [`trailers`](Self::trailers) reads it.
     ///
-    /// Field: `git_message_trailer_array.count`
+    /// Wraps `fld::git_message_trailer_array.count`
+    #[doc(alias = "git_message_trailer_array.count")]
     #[must_use]
     pub fn len(&self) -> usize {
         let array = self.as_ptr();
@@ -653,7 +655,8 @@ impl<'a> MessageTrailerArrayRef<'a> {
     /// long too. No exclusive handle reaches them (see the
     /// [module docs](self#trailer-arrays)).
     ///
-    /// Field: `git_message_trailer_array.trailers`
+    /// Wraps `fld::git_message_trailer_array.trailers`
+    #[doc(alias = "git_message_trailer_array.trailers")]
     #[must_use]
     pub fn trailers(&self) -> CSlice<'a, MessageTrailer<'a>> {
         let len = self.len();
@@ -694,7 +697,8 @@ impl MessageTrailerArrayMut<'_> {
     /// Takes the block and the trailers out into an owner of their own, leaving the
     /// empty array, which libgit2 can fill again without leaking what it overwrites.
     ///
-    /// Field: `git_message_trailer_array`._`trailer_block`
+    /// Wraps `fld::git_message_trailer_array._trailer_block`
+    #[doc(alias = "git_message_trailer_array._trailer_block")]
     pub fn take(&mut self) -> MessageTrailerArrayVal {
         let array = self.as_mut_ptr();
         // SAFETY: the exclusive handle's pointer addresses a live, initialised
@@ -709,7 +713,8 @@ impl MessageTrailerArrayMut<'_> {
     /// Replaces the block and the trailers with `array`'s, releasing the ones held
     /// before through `git_message_trailer_array_free`.
     ///
-    /// Field: `git_message_trailer_array`._`trailer_block`
+    /// Wraps `fld::git_message_trailer_array._trailer_block`
+    #[doc(alias = "git_message_trailer_array._trailer_block")]
     pub fn set(&mut self, array: MessageTrailerArrayVal) {
         let raw = array.into_inner().into_raw();
         let place = self.as_mut_ptr();
