@@ -68,8 +68,8 @@ use crate::ffi;
 /// std::thread::spawn(move || drop(options));
 /// ```
 ///
-/// Wraps: `git_config_backend_memory_options`
-/// Handwritten
+/// Wraps `ty::git_config_backend_memory_options`
+#[doc(alias = "git_config_backend_memory_options")]
 #[repr(transparent)]
 pub struct BackendMemoryOptions<'o>(
     pub(crate) ffi::git_config_backend_memory_options,
@@ -77,15 +77,11 @@ pub struct BackendMemoryOptions<'o>(
 );
 
 /// Copyable shared view of memory backend options.
-///
-/// Handwritten
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub struct BackendMemoryOptionsRef<'a, 'o>(CBorrowedPtr<'a, BackendMemoryOptions<'o>>);
 
 /// Exclusive view, invariant in the stored-borrow lifetime.
-///
-/// Handwritten
 #[repr(transparent)]
 pub struct BackendMemoryOptionsMut<'a, 'o>(
     BackendMemoryOptionsRef<'a, 'o>,
@@ -141,12 +137,13 @@ impl<'o> BackendMemoryOptions<'o> {
     /// C's defaults: current version and both strings unset. No library
     /// initialization is needed: this version's init only copies a template.
     ///
-    /// Wraps: `git_config_backend_memory_options_init`
+    /// Wraps `fn::git_config_backend_memory_options_init`
     ///
     /// # Panics
     ///
     /// Panics only if libgit2 refuses the version of the options it defines itself, which it never
     /// does.
+    #[doc(alias = "git_config_backend_memory_options_init")]
     #[must_use]
     pub fn new() -> Self {
         let mut raw = MaybeUninit::uninit();
@@ -195,7 +192,8 @@ impl Clone for BackendMemoryOptions<'_> {
 impl<'a> BackendMemoryOptionsRef<'a, '_> {
     /// Structure version; constructors use the current supported version.
     ///
-    /// Field: `git_config_backend_memory_options.version`
+    /// Wraps `fld::git_config_backend_memory_options.version`
+    #[doc(alias = "git_config_backend_memory_options.version")]
     #[must_use]
     pub fn version(&self) -> u32 {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -207,7 +205,8 @@ impl<'a> BackendMemoryOptionsRef<'a, '_> {
 
     /// Unset means C will use "in-memory"; an empty string is distinct from unset.
     ///
-    /// Field: `git_config_backend_memory_options.backend_type`
+    /// Wraps `fld::git_config_backend_memory_options.backend_type`
+    #[doc(alias = "git_config_backend_memory_options.backend_type")]
     #[must_use]
     pub fn backend_type(&self) -> Option<&'a CStr> {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -226,7 +225,8 @@ impl<'a> BackendMemoryOptionsRef<'a, '_> {
 
     /// Unset means entries have no origin; empty and non-UTF-8 strings are valid.
     ///
-    /// Field: `git_config_backend_memory_options.origin_path`
+    /// Wraps `fld::git_config_backend_memory_options.origin_path`
+    #[doc(alias = "git_config_backend_memory_options.origin_path")]
     #[must_use]
     pub fn origin_path(&self) -> Option<&'a CStr> {
         // SAFETY: `self.as_ptr()` addresses the live object this handle borrows; the projection
@@ -279,6 +279,9 @@ impl<'o> BackendMemoryOptionsMut<'_, 'o> {
 
     /// Sets the scalar version. C's memory backend constructors currently ignore
     /// it; normally leave this at the constructor's supported version.
+    ///
+    /// Wraps `fld::git_config_backend_memory_options.version`
+    #[doc(alias = "git_config_backend_memory_options.version")]
     pub fn set_version(&mut self, version: u32) {
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
         // forms no reference to it.
@@ -288,6 +291,9 @@ impl<'o> BackendMemoryOptionsMut<'_, 'o> {
     }
 
     /// Replaces the stored immutable borrow; never frees either string.
+    ///
+    /// Wraps `fld::git_config_backend_memory_options.backend_type`
+    #[doc(alias = "git_config_backend_memory_options.backend_type")]
     pub fn set_backend_type(&mut self, value: Option<&'o CStr>) {
         let value = value.map_or(ptr::null(), CStr::as_ptr);
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
@@ -299,6 +305,9 @@ impl<'o> BackendMemoryOptionsMut<'_, 'o> {
     }
 
     /// Replaces the stored immutable borrow; never frees either string.
+    ///
+    /// Wraps `fld::git_config_backend_memory_options.origin_path`
+    #[doc(alias = "git_config_backend_memory_options.origin_path")]
     pub fn set_origin_path(&mut self, value: Option<&'o CStr>) {
         let value = value.map_or(ptr::null(), CStr::as_ptr);
         // SAFETY: `self.as_mut_ptr()` addresses the live object this handle borrows; the projection
