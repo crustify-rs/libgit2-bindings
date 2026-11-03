@@ -1,0 +1,21 @@
+error[E0502]: cannot borrow `progress` as immutable because it is also borrowed as mutable
+  --> tests/ub_safe/compile_fail/indexer_progress_mut_aliased.rs:8:13
+   |
+ 7 |     let mut a = progress.as_mut();
+   |                 -------- mutable borrow occurs here
+ 8 |     let r = progress.as_ref();
+   |             ^^^^^^^^ immutable borrow occurs here
+ 9 |     let mut b = progress.as_mut();
+10 |     a.set_total_objects(1);
+   |     - mutable borrow later used here
+
+error[E0499]: cannot borrow `progress` as mutable more than once at a time
+  --> tests/ub_safe/compile_fail/indexer_progress_mut_aliased.rs:9:17
+   |
+ 7 |     let mut a = progress.as_mut();
+   |                 -------- first mutable borrow occurs here
+ 8 |     let r = progress.as_ref();
+ 9 |     let mut b = progress.as_mut();
+   |                 ^^^^^^^^ second mutable borrow occurs here
+10 |     a.set_total_objects(1);
+   |     - first borrow later used here

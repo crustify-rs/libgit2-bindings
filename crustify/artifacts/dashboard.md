@@ -59,14 +59,14 @@ in Notes.
 
 | | count | share | C LoC coverage | Rust LoC coverage |
 |---|---:|---:|---:|---:|
-| UB safe tests | `752` | — | `35.80`% | `84.57`% |
+| UB safe tests | `758` | — | `35.80`% | `84.57`% |
 | UB unsafe tests | `95` | — | `22.20`% | `12.70`% |
 | Equiv tests | `464` | — | `43.73`% | `76.50`% |
-| Unit tests | `712` | — | `32.13`% | `87.48`% |
-| **Total tests** | **`2023`** | — | **`46.65`%** | **`99.55`%** |
+| Unit tests | `717` | — | `32.13`% | `87.48`% |
+| **Total tests** | **`2034`** | — | **`46.65`%** | **`99.55`%** |
 | total types | `258` | — | — | — |
 | ported types | `0` | `0.00`% | — | — |
-| wrapped types | `96` | `37.21`% | — | — |
+| wrapped types | `97` | `37.60`% | — | — |
 | total symbols | `979` | — | — | — |
 | ported symbols | `4` | `0.41`% | — | — |
 | wrapped symbols | `421` | `43.00`% | — | — |
@@ -206,6 +206,7 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/index` | `48` | `7` | first | `1` | `0` | `+1226/-1` | `45.43`% / `99.50`% | `$21.81` | `13.93M` | `40m51s` | `$21.81` | — |
 | `libgit2/index` | `50` | `0` | first | `2` | `14` | `+1543/-14` | `45.80`% / `99.53`% | `$5.84` | `14.76M` | `23m16s` | `$2.92` | `$0.42` |
 | `libgit2/index` | `50` | `1` | first | `1` | `3` | `+806/-5` | `45.85`% / `99.54`% | `$6.21` | `17.23M` | `25m45s` | `$6.21` | `$2.07` |
+| `libgit2/src/libgit2/indexer.c` | `172` | `0` | first | `1` | `7` | `+727/-0` | — | `$<n>` | `<n>M` | `<n>m<n>s` | `$<n>` | `$<n>` |
 | `libgit2/util` | `6` | `0` | review | `2` | `5` | `+172/-15` | `1.63`% / `99.74`% | `$20.66` | `23.31M` | `48m16s` | `$10.33` | `$4.13` |
 | `libgit2/util` | `6` | `1` | review | `2` | `0` | `+149/-12` | `1.63`% / `98.42`% | `$7.58` | `10.10M` | `18m18s` | `$3.79` | — |
 | `libgit2/oid` | `11` | `0` | review | `2` | `2` | `+224/-6` | `7.81`% / `99.48`% | `$14.93` | `18.05M` | `29m10s` | `$7.46` | `$7.46` |
@@ -226,7 +227,7 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/config` | `47` | `0` | review | `1` | `14` | `+198/-26` | `42.79`% / `99.49`% | `$8.96` | `25.80M` | `26m55s` | `$8.96` | `$0.64` |
 | `libgit2/index` | `49` | `0` | review | `15` | `5` | `+738/-79` | `45.75`% / `99.53`% | `$15.85` | `50.35M` | `46m20s` | `$1.06` | `$3.17` |
 | `libgit2/index` | `51` | `0` | review | `3` | `17` | `+203/-8` | `46.57`% / `99.53`% | `$12.82` | `35.96M` | `48m41s` | `$4.27` | `$0.75` |
-| **Σ first** |  |  |  | **`96`** | **`145`** | **`+89147/-2035`** | **`45.85`% / `99.54`%** | **`$525.20`** | **`1248.21M`** | — | **`$5.47`** | **`$3.62`** |
+| **Σ first** |  |  |  | **`97`** | **`152`** | **`+89874/-2035`** | **`45.85`% / `99.54`%** | **`$525.20`** | **`1248.21M`** | — | **`$5.47`** | **`$3.62`** |
 | **Σ review** |  |  |  | **`96`** | **`145`** | **`+9264/-2031`** | **`46.57`% / `99.53`%** | **`$389.04`** | **`612.85M`** | — | **`$4.05`** | **`$2.68`** |
 
 ### Batches — wrap: tests
@@ -294,6 +295,7 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/index` | `48` | `7` | first | `+2` (`+0.35`/`-0.35` pp) | `+5` (`+1.23`/`+0.91` pp) | `+3` (`+0.45`/`+0.14` pp) | `+2` (`+0.13`/`-0.35` pp) |
 | `libgit2/index` | `50` | `0` | first | `+6` (`+0.02`/`+0.20` pp) | `+0` (`+0.18`/`-0.27` pp) | `+2` (`+0.02`/`-0.73` pp) | `+4` (`+0.00`/`-0.17` pp) |
 | `libgit2/index` | `50` | `1` | first | `+4` (`+0.12`/`+0.00` pp) | `+0` (`-0.16`/`-0.06` pp) | `+2` (`+0.13`/`+0.03` pp) | `+2` (`+0.02`/`-0.04` pp) |
+| `libgit2/src/libgit2/indexer.c` | `172` | `0` | first | `+6` (—/— pp) | `+0` (—/— pp) | `+0` (—/— pp) | `+5` (—/— pp) |
 | `libgit2/util` | `6` | `0` | review | `+0` (`+0.00`/`+0.00` pp) | `+1` (`+0.00`/`+0.00` pp) | `+0` (`+0.00`/`+0.00` pp) | `+2` (`+0.00`/`+0.00` pp) |
 | `libgit2/util` | `6` | `1` | review | `+0` (`+0.00`/`-0.44` pp) | `+0` (`+0.00`/`-0.79` pp) | `+1` (`+0.27`/`-0.49` pp) | `+1` (`+0.00`/`+0.20` pp) |
 | `libgit2/oid` | `11` | `0` | review | `+1` (`+0.00`/`+0.32` pp) | `+0` (`+0.00`/`-0.39` pp) | `+1` (`+0.00`/`-0.61` pp) | `+4` (`+0.00`/`+0.57` pp) |
@@ -314,7 +316,7 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/config` | `47` | `0` | review | `+0` (`-0.02`/`+0.00` pp) | `+0` (`-0.29`/`-0.01` pp) | `+1` (`-0.04`/`-0.03` pp) | `+1` (`-0.02`/`+0.03` pp) |
 | `libgit2/index` | `49` | `0` | review | `+1` (`+0.08`/`-0.09` pp) | `+2` (`+0.33`/`+0.40` pp) | `+1` (`+0.18`/`-0.04` pp) | `+2` (`+0.00`/`+0.09` pp) |
 | `libgit2/index` | `51` | `0` | review | `+1` (`-0.01`/`+0.00` pp) | `+0` (`+0.04`/`+0.00` pp) | `+0` (`-0.01`/`+0.00` pp) | `+2` (`+0.10`/`+0.05` pp) |
-| **Σ first** |  |  |  | **`+425` (`+24.85`/`-2.70` pp)** | **`+55` (`+16.78`/`-52.20` pp)** | **`+244` (`+31.12`/`-24.83` pp)** | **`+433` (`+12.61`/`+24.41` pp)** |
+| **Σ first** |  |  |  | **`+431` (`+24.85`/`-2.70` pp)** | **`+55` (`+16.78`/`-52.20` pp)** | **`+244` (`+31.12`/`-24.83` pp)** | **`+438` (`+12.61`/`+24.41` pp)** |
 | **Σ review** |  |  |  | **`+34` (`+0.37`/`+2.20` pp)** | **`+3` (`-0.40`/`-5.36` pp)** | **`+22` (`+2.71`/`-1.21` pp)** | **`+39` (`+4.66`/`+2.36` pp)** |
 
 ### Batches — port
@@ -402,6 +404,7 @@ Deterministic `ffimap`; no model.
 | `libgit2/index` | `48` | `7` | wrap | first | `+0` | `+4` | `+0` | `+4` | — | — | `+0.06` pp | `+17` | — | — | `+1` | `+0` |
 | `libgit2/index` | `50` | `0` | wrap | first | `+0` | `+0` | `+0` | `+0` | — | — | `-0.02` pp | `+40` | — | — | `+0` | `+0` |
 | `libgit2/index` | `50` | `1` | wrap | first | `+0` | `+0` | `+0` | `+0` | — | — | `+0.08` pp | `+10` | — | — | `+0` | `+0` |
+| `libgit2/src/libgit2/indexer.c` | `172` | `0` | wrap | first | `+0` | `+0` | `+0` | `+0` | — | — | `+0.03` pp | `+30` | `+6` | — | `+0` | `+0` |
 | `libgit2/util` | `6` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `+0` | — | — | `+0` | `+0` |
 | `libgit2/util` | `6` | `1` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `-0.04` pp | `+2` | — | — | `+0` | `+0` |
 | `libgit2/oid` | `11` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `-0.18` pp | `+0` | — | — | `+0` | `+0` |
@@ -422,7 +425,7 @@ Deterministic `ffimap`; no model.
 | `libgit2/config` | `47` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `-1` | — | — | `+0` | `+0` |
 | `libgit2/index` | `49` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `-0.03` pp | `+0` | — | — | `+0` | `+0` |
 | `libgit2/index` | `51` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `+0` | — | — | `+0` | `+0` |
-| **Σ first** |  |  |  |  | **`+4`** | **`+9`** | **`+8`** | **`+13`** | — | — | **`-0.67` pp** | **`+965`** | — | — | **`+7`** | **`+7`** |
+| **Σ first** |  |  |  |  | **`+4`** | **`+9`** | **`+8`** | **`+13`** | — | — | **`-0.64` pp** | **`+995`** | — | — | **`+7`** | **`+7`** |
 | **Σ review** |  |  |  |  | **`+0`** | **`+0`** | **`+0`** | **`-3`** | — | — | **`-0.14` pp** | **`+20`** | — | — | **`+0`** | **`-2`** |
 
 ### Batches — review: PoC + reports
@@ -987,6 +990,20 @@ private `void *` smells. `&`/`&mut` on a wrapper sums `ref_to_type_wrapper_smell
 `ref_to_type_wrapper_body_smell`, and `field proj outside an accessor` is
 `field_proj_outside_impl`. The 8 wrapper-reference smells have stood since
 `raw-lifetime-string`, and the 4 outside-accessor projections since `libgit2/core`.
+### `libgit2/src/libgit2/indexer.c` wave 172: coverage not measured
+
+Wave 172 batch 0 (`git_indexer_progress`) leaves its `cov (C/Rust)` cell and its tests'
+`(+C/+Rust pp)` pairs at `—`, and the coverage percentages in Coverage stats and the
+`Σ first` `cov` cell as the previous landing left them; its test counts are updated. The
+documented method needs `cargo-llvm-cov` and `lcov`, neither installed on the host, and the
+`coverage` variant is a gcov build whose `.gcda` files are written into the shared build
+directory. The batch's own Rust paths were checked with source-based coverage instead
+(`-C instrument-coverage`, `nightly-2026-10-07`'s `llvm-cov`): its unit and `ub_safe`
+tests cover every line, function and region of `src/libgit2/src/libgit2/indexer.rs`. It
+calls no C. Its safety audit row fills `Send/Sync` (`+6`: `Send` and `Sync` for the value
+and its two handles) from the dotted ffimap counters `ty.impl_trait.of_which.std.send` and
+`.sync`; `C borrow`, `slice borrow` and `C by value` stay `—`.
+
 ### Parallelism and review caps from `libgit2/repository`
 
 Before `libgit2/repository` the operator raised the batch parallelism from orchestrator's

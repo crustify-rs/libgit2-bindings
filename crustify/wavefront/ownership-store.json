@@ -1825,6 +1825,12 @@
    "_comment_user": "Resource-free pair of i32 seconds/u32 nanoseconds, embedded in index entries and copied/serialized verbatim (index.c read_entry/write_entry, index.h git_index_time_eq). Every integer bit pattern accepted, no pointers, lifecycle or normalization. Wrapped inline value and projected shared/mutable handles."
   },
   {
+   "name": "git_indexer_progress",
+   "defined_in": "include/git2/indexer.h",
+   "_comment_user": "Plain counters: six unsigned ints and a size_t, no pointer, no refcount, no lock, no padding (32 bytes). No routine allocates, frees, copies or disposes one: callers hold it by value (stack, or embedded as git_remote.stats) and pass a pointer for the indexer, transports and odb writepacks to fill. git_indexer_append resets every counter on the pack header and increments them afterwards; git_indexer_commit derives total_deltas as total_objects - indexed_objects (unsigned, wraps) and writes total_objects + local_objects into the pack header. Progress callbacks receive it as const *. Every bit pattern is a valid value of the type; consistency between counters is a contract of the indexer routines, not of the type. Rust: a Copy, CZeroable layout value with getters and setters.",
+   "fields": []
+  },
+  {
    "name": "git_iterator",
    "defined_in": "src/libgit2/iterator.h",
    "fields": [

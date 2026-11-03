@@ -674,3 +674,6 @@ var GIT_CONFIG_BACKEND_VERSION
 # Diff parse lifecycle defaults
 var GIT_DIFF_PARSE_OPTIONS_VERSION
 var GIT_DIFF_OPTIONS_VERSION
+
+# Indexer progress counters
+type git_indexer_progress

@@ -1,0 +1,11 @@
+error[E0597]: `progress` does not live long enough
+ --> tests/ub_safe/compile_fail/indexer_progress_handle_outlives_value.rs:8:9
+  |
+6 |     let handle = {
+  |         ------ borrow later stored here
+7 |         let progress = IndexerProgress::zeroed();
+  |             -------- binding `progress` declared here
+8 |         progress.as_ref()
+  |         ^^^^^^^^ borrowed value does not live long enough
+9 |     };
+  |     - `progress` dropped here while still borrowed

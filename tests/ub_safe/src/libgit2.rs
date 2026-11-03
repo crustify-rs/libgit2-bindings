@@ -9,6 +9,7 @@ mod config;
 mod diff;
 mod filter;
 mod index;
+mod indexer;
 mod libgit2;
 mod mailmap;
 mod notes;

@@ -1,0 +1,11 @@
+error[E0599]: no method named `set_received_bytes` found for struct `IndexerProgressRef<'a>` in the current scope
+ --> tests/ub_safe/compile_fail/indexer_progress_ref_has_no_setters.rs:8:7
+  |
+8 |     r.set_received_bytes(1);
+  |       ^^^^^^^^^^^^^^^^^^
+  |
+help: there is a method `received_bytes` with a similar name, but with different arguments
+ --> src/libgit2/src/libgit2/indexer.rs
+  |
+  |     pub fn received_bytes(&self) -> usize {
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
