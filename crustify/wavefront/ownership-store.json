@@ -5434,6 +5434,95 @@
    ]
   },
   {
+   "name": "git_checkout_notify_cb",
+   "defined_in": null,
+   "ptr_args": [
+    {
+     "name": "arg1",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg1"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "path: lent for the call only and only read. checkout_notify, the sole invoker, passes the delta's old_file.path when it has a delta, else the working-directory index entry's path; NULL only if it had neither, which no caller does. Owned by the checkout's diff or workdir iterator for the call. Bound as checkout::NotifyCallback, whose trampoline lends it as CheckoutNotification::path, an Option<&CStr> that cannot outlive the call."
+     }
+    },
+    {
+     "name": "arg2",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg2"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "baseline: &delta->old_file of the checkout's diff, lent for the call and only read; NULL for added, ignored, untracked and unreadable deltas and when there is no delta (an untracked or ignored workdir item). Lent as CheckoutNotification::baseline, an Option<DiffFileRef<'call>>."
+     }
+    },
+    {
+     "name": "arg3",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg3"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "target: &delta->new_file of the checkout's diff, lent for the call and only read; NULL for deleted deltas and when there is no delta. Lent as CheckoutNotification::target, an Option<DiffFileRef<'call>>."
+     }
+    },
+    {
+     "name": "arg4",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg4"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "workdir: a git_diff_file on checkout_notify's own stack, filled from the workdir index entry (id, path borrowed from the entry, size, mode, VALID_ID), so valid for the call only; NULL when the path is missing on disk. Lent as CheckoutNotification::workdir, an Option<DiffFileRef<'call>>."
+     }
+    },
+    {
+     "name": "arg5",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "payload: git_checkout_options.notify_payload, passed through unchanged on every call; libgit2 neither reads nor frees it. It must stay valid while a routine given the options may call back (git_checkout_head/index/tree, and the routines that check out through them; a rebase keeps the options copy). The return value is propagated: non-zero cancels the checkout with that code, after git_error_set_after_callback_function. NotifyCallback passes itself, exclusively borrowed for the routine that drives the calls, and returns 0 or GIT_EUSER."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_checkout_options_init",
    "defined_in": "src/libgit2/checkout.c",
    "lifetime": {
@@ -5462,6 +5551,46 @@
       "nullable": false,
       "mutable": true,
       "note": "The caller's storage, borrowed for the call; written whole (memcpy of GIT_CHECKOUT_OPTIONS_INIT: version 1, every other field zero/NULL) and only when `version` is 1. For version 0 or > 1 it returns -1 with GIT_ERROR_INVALID 'invalid version N on git_checkout_options' and leaves *opts untouched (still uninitialised if it was). Not NULL-checked: NULL with version 1 is a NULL write. With version 1 it reaches no global, allocator or thread state, so it needs no runtime pin."
+     }
+    }
+   ]
+  },
+  {
+   "name": "git_checkout_perfdata_cb",
+   "defined_in": null,
+   "ptr_args": [
+    {
+     "name": "arg0",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg0"
+      },
+      "nullable": false,
+      "mutable": false,
+      "note": "perfdata: &data.perfdata, the counters in git_checkout_iterator's own checkout_data, lent for the single call made once every write has succeeded (never on a dry run, a failure or a cancel) and only read. Bound as checkout::PerfdataCallback, whose trampoline lends it as a CheckoutPerfdataRef that cannot outlive the call; the trampoline skips a NULL rather than invent counters."
+     }
+    },
+    {
+     "name": "arg1",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "payload: git_checkout_options.perfdata_payload, passed through unchanged; libgit2 neither reads nor frees it. T3's erased_field row (a git_checkout_perfdata) reflects libgit2's own tests, which copy the counters into one; the type does not constrain it. PerfdataCallback passes itself, exclusively borrowed for the routine that drives the call."
      }
     }
    ]

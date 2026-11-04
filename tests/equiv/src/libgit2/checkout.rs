@@ -17,9 +17,16 @@
 //! paths and counts, call for call. The Rust callback is reached through a C-ABI forwarder
 //! that hands each call to [`ProgressCallback::call`], since no wrapper of a checkout
 //! routine takes it yet.
+//!
+//! A [`NotifyCallback`] and a [`PerfdataCallback`] over closures are compared with C
+//! notification and performance callbacks the same way: both sides must see the same
+//! reasons, paths and sides, cancel the same checkouts, and see the same counters, call
+//! for call. A cancelling C callback returns `GIT_EUSER` there, the code a
+//! [`ControlFlow::Break`] becomes.
 
 use std::cell::RefCell;
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
+use std::ops::ControlFlow;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -31,8 +38,10 @@ use ffibox::CRefSeam;
 use glibc_bindings::libc::ffi as libc;
 use libgit2::ffi;
 use libgit2::libgit2::src::libgit2::checkout::{
-    CheckoutOptions, CheckoutOptionsRef, CheckoutPerfdata, CheckoutPerfdataRef, ProgressCallback,
+    CheckoutNotification, CheckoutOptions, CheckoutOptionsRef, CheckoutPerfdata,
+    CheckoutPerfdataRef, NotifyCallback, PerfdataCallback, ProgressCallback,
 };
+use libgit2::libgit2::src::libgit2::diff::DiffFileRef;
 use libgit2::libgit2::src::libgit2::index::IndexArc;
 use libgit2::libgit2::src::libgit2::repository::{InitFlag, InitOptions, Repository};
 use libgit2::libgit2::src::libgit2::strarray::StrArrayView;
@@ -1462,4 +1471,270 @@ fn a_progress_callback_sees_conflicts_as_a_c_callback() {
             .any(|(p, ..)| p.as_deref() == Some("f.txt")),
         "a skipped conflict is not a step"
     );
+}
+
+/// Hands libgit2's notification arguments to the [`NotifyCallback`] at `payload`, through
+/// [`NotifyCallback::call`], which runs the trampoline libgit2 would call, and returns its
+/// verdict as the trampoline does.
+extern "C" fn forward_notify(
+    why: ffi::git_checkout_notify_t,
+    path: *const c_char,
+    baseline: *const ffi::git_diff_file,
+    target: *const ffi::git_diff_file,
+    workdir: *const ffi::git_diff_file,
+    payload: *mut c_void,
+) -> c_int {
+    // SAFETY: the payload `compare_callbacks` installs is its notification callback, which
+    // nothing else uses while a checkout runs.
+    let callback = unsafe { &mut *payload.cast::<NotifyCallback<'_>>() };
+    // SAFETY: libgit2 passes NULL or a NUL-terminated string live for the call.
+    let path = (!path.is_null()).then(|| unsafe { CStr::from_ptr(path) });
+    // SAFETY: libgit2 passes NULL or a diff file live and unchanged for the call.
+    let file = |f: *const ffi::git_diff_file| unsafe { DiffFileRef::from_ptr(f.cast_mut()) };
+    let notification = CheckoutNotification {
+        why,
+        path,
+        baseline: file(baseline),
+        target: file(target),
+        workdir: file(workdir),
+    };
+    match callback.call(notification) {
+        ControlFlow::Continue(()) => 0,
+        ControlFlow::Break(()) => ffi::GIT_EUSER,
+    }
+}
+
+/// Hands libgit2's counters to the [`PerfdataCallback`] at `payload`, through
+/// [`PerfdataCallback::call`].
+extern "C" fn forward_perfdata(data: *const ffi::git_checkout_perfdata, payload: *mut c_void) {
+    // SAFETY: the payload `compare_callbacks` installs is its performance-data callback,
+    // which nothing else uses while a checkout runs.
+    let callback = unsafe { &mut *payload.cast::<PerfdataCallback<'_>>() };
+    // SAFETY: libgit2 lends its live counters for the call.
+    let data = unsafe { CheckoutPerfdataRef::from_ptr(data.cast_mut()) }.unwrap();
+    callback.call(data);
+}
+
+/// Runs `steps` on two independent fixtures (`conflict` adds the index conflict to
+/// both): with the C notification and performance callbacks on a C struct, and with a
+/// [`NotifyCallback`] and a [`PerfdataCallback`] over closures, logging as the C ones do,
+/// on a [`CheckoutOptions`]. After every step, both checkouts must have done the same,
+/// and both pairs of callbacks seen the same calls.
+fn compare_callbacks(tag: &str, conflict: bool, steps: &[Step]) -> Vec<Outcome> {
+    let (cf, rf) = (
+        Fixture::new(&format!("{tag}-c")),
+        Fixture::new(&format!("{tag}-rust")),
+    );
+    if conflict {
+        cf.add_conflict();
+        rf.add_conflict();
+    }
+    let (clog, rlog) = (RefCell::new(Log::default()), RefCell::new(Log::default()));
+    let c_paths: Vec<Vec<*mut c_char>> = steps
+        .iter()
+        .map(|s| s.paths.iter().map(|p| p.as_ptr().cast_mut()).collect())
+        .collect();
+    let views: Vec<StrArrayView<'_>> = steps.iter().map(|s| StrArrayView::new(s.paths)).collect();
+    let mut record_notify = |n: CheckoutNotification<'_>| {
+        let text =
+            |s: Option<&CStr>| s.map_or_else(String::new, |s| s.to_string_lossy().into_owned());
+        let side = |f: Option<DiffFileRef<'_>>| f.map(|f| text(f.path()));
+        let mut log = rlog.borrow_mut();
+        let files = [side(n.baseline), side(n.target), side(n.workdir)];
+        log.notify.push((n.why, text(n.path), files));
+        if log.cancel == 0 {
+            ControlFlow::Continue(())
+        } else {
+            ControlFlow::Break(())
+        }
+    };
+    let mut record_perfdata = |d: CheckoutPerfdataRef<'_>| {
+        let counts = (d.mkdir_calls(), d.stat_calls(), d.chmod_calls());
+        rlog.borrow_mut().perfdata.push(counts);
+    };
+    let mut notify = NotifyCallback::new(&mut record_notify);
+    let mut perfdata = PerfdataCallback::new(&mut record_perfdata);
+    let notify_payload = ptr::from_mut(&mut notify).cast::<c_void>();
+    let perfdata_payload = ptr::from_mut(&mut perfdata).cast::<c_void>();
+
+    let mut c = ffi::git_checkout_options::default();
+    // SAFETY: `c` is writable storage for the struct; version 1 is accepted.
+    let rc =
+        unsafe { ffi::git_checkout_options_init(&raw mut c, ffi::GIT_CHECKOUT_OPTIONS_VERSION) };
+    assert_eq!(rc, 0);
+    let mut rust = CheckoutOptions::new();
+    let mut outcomes = Vec::new();
+    for (i, step) in steps.iter().enumerate() {
+        step.apply_c(&mut c, &cf, &clog, &c_paths[i]);
+        step.apply_rust(&mut rust, &rf, &rlog, &views[i]);
+        let mut m = rust.as_mut();
+        if !matches!(step.notify, Notify::Off) {
+            // SAFETY: `forward_notify` hands every call to the callback at its payload,
+            // which outlives the options and which only the checkouts below use.
+            unsafe { m.set_notify_callback(Some(forward_notify), notify_payload) };
+        }
+        if step.perfdata {
+            // SAFETY: as above, for `forward_perfdata`.
+            unsafe { m.set_perfdata_callback(Some(forward_perfdata), perfdata_payload) };
+        }
+        let mut expected = step.checkout(&cf, &clog, &raw const c);
+        let mut actual = step.checkout(&rf, &rlog, c_ptr(&rust));
+        if expected.rc == ffi::GIT_EUSER {
+            // libgit2 sets a cancel's message only when the thread holds no error yet, and
+            // whether its config refresh left a benign one (a missing global config file)
+            // varies from run to run, on either side: the message is libgit2's, so each
+            // side need only hold one of the two.
+            for outcome in [&mut expected, &mut actual] {
+                let (class, message) = outcome.error.take().unwrap();
+                assert!(
+                    (class, message.as_str())
+                        == (
+                            ffi::GIT_ERROR_CALLBACK.cast_signed(),
+                            "git_checkout notification callback returned -7"
+                        )
+                        || class == ffi::GIT_ERROR_OS.cast_signed(),
+                    "step {i}: {class} {message}"
+                );
+            }
+        }
+        assert_eq!(actual, expected, "checkout at step {i}: {step:?}");
+        outcomes.push(actual);
+    }
+    outcomes
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn notify_and_perfdata_callbacks_see_what_c_callbacks_see() {
+    let watched = Step {
+        tree: 1,
+        strategy: FORCE,
+        notify: Notify::On,
+        notify_flags: ALL,
+        perfdata: true,
+        ..Step::default()
+    };
+    let steps = [
+        // A safe checkout over the dirty working directory: what blocks it is notified,
+        // and it fails before reporting counts.
+        Step {
+            strategy: 0,
+            ..watched
+        },
+        // Every file of tree 1 into a fresh target directory.
+        Step {
+            target: Some(0),
+            ..watched
+        },
+        // A dry run notifies, and counts nothing.
+        Step {
+            strategy: FORCE | GIT_CHECKOUT_DRY_RUN,
+            target: Some(1),
+            ..watched
+        },
+        // A cancel stops the checkout before it writes or counts anything.
+        Step {
+            notify: Notify::Cancel(ffi::GIT_EUSER),
+            target: Some(2),
+            ..watched
+        },
+        // Only some reasons, into the working directory, over a dirty file.
+        Step {
+            notify_flags: ffi::GIT_CHECKOUT_NOTIFY_UPDATED | ffi::GIT_CHECKOUT_NOTIFY_DIRTY,
+            write: Some(("e.txt", "dirty\n")),
+            ..watched
+        },
+        // Back to tree 0 from a tree 1 baseline: an update, with all three sides.
+        Step {
+            tree: 0,
+            baseline: Baseline::Tree(1),
+            ..watched
+        },
+        // A cancel on one reason only, from the performance callback's step.
+        Step {
+            tree: 1,
+            notify: Notify::Cancel(ffi::GIT_EUSER),
+            notify_flags: ffi::GIT_CHECKOUT_NOTIFY_UPDATED,
+            baseline: Baseline::Tree(0),
+            ..watched
+        },
+        // Neither callback.
+        Step {
+            notify: Notify::Off,
+            perfdata: false,
+            ..watched
+        },
+    ];
+    let outcomes = compare_callbacks("callbacks", false, &steps);
+    let log = |i: usize| &outcomes[i].log;
+    assert_ne!(outcomes[0].rc, 0);
+    assert!(!log(0).notify.is_empty() && log(0).perfdata.is_empty());
+    assert!(!log(1).notify.is_empty() && log(1).perfdata.len() == 1);
+    assert!(!log(2).notify.is_empty() && log(2).perfdata.is_empty());
+    assert_eq!((outcomes[3].rc, log(3).notify.len()), (ffi::GIT_EUSER, 1));
+    assert_eq!(log(3).perfdata, []);
+    let a = Some("a.txt".to_owned());
+    assert_eq!(
+        log(5).notify,
+        [(
+            ffi::GIT_CHECKOUT_NOTIFY_UPDATED,
+            "a.txt".to_owned(),
+            [a.clone(), a.clone(), a]
+        )]
+    );
+    assert_eq!(outcomes[6].rc, ffi::GIT_EUSER);
+    assert!(log(7).notify.is_empty() && log(7).perfdata.is_empty());
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn a_notify_callback_sees_conflicts_as_a_c_callback() {
+    let watched = Step {
+        index: true,
+        notify: Notify::On,
+        notify_flags: ALL,
+        perfdata: true,
+        ..Step::default()
+    };
+    let steps = [
+        // A safe checkout of the conflicted index over the working directory: each file
+        // in the way is a conflict.
+        watched,
+        // Cancelled at the first conflict, the only reason notified.
+        Step {
+            notify: Notify::Cancel(ffi::GIT_EUSER),
+            notify_flags: ffi::GIT_CHECKOUT_NOTIFY_CONFLICT,
+            ..watched
+        },
+        // Into fresh directories, conflicts allowed or skipped: updates, then the counts.
+        Step {
+            strategy: GIT_CHECKOUT_ALLOW_CONFLICTS,
+            target: Some(0),
+            ..watched
+        },
+        Step {
+            strategy: FORCE | GIT_CHECKOUT_SKIP_UNMERGED,
+            target: Some(1),
+            ..watched
+        },
+    ];
+    let outcomes = compare_callbacks("callbacks-conflict", true, &steps);
+    let conflicts = |i: usize| {
+        let notify = &outcomes[i].log.notify;
+        notify
+            .iter()
+            .filter(|(why, ..)| *why == ffi::GIT_CHECKOUT_NOTIFY_CONFLICT)
+            .count()
+    };
+    assert_ne!(outcomes[0].rc, 0);
+    assert!(conflicts(0) > 1, "{:?}", outcomes[0].log.notify);
+    assert_eq!(
+        (outcomes[1].rc, outcomes[1].log.notify.len()),
+        (ffi::GIT_EUSER, 1)
+    );
+    assert_eq!(conflicts(1), 1);
+    for outcome in &outcomes[2..] {
+        assert_eq!(outcome.rc, 0);
+        assert_eq!(outcome.log.perfdata.len(), 1, "{outcome:?}");
+    }
 }

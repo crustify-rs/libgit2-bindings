@@ -790,3 +790,397 @@ mod progress_callback {
         );
     }
 }
+
+/// The `NotifyCallback` tests: it is called through its `extern "C"` trampoline, as
+/// libgit2 calls it, and lends its closure each notification for the call only. The sides
+/// are diff files libgit2 parsed from a patch, freed right after the calls, and the paths
+/// allocations of exactly their length, freed after theirs (`ASan`); the closures copy
+/// what they keep. A break comes back as a cancel, and a panic never crosses the
+/// trampoline: it resumes from `call`, after which the callback runs its closure again.
+/// Callbacks run on several threads at once, each over its own closure and sharing only a
+/// lock (`TSan`). Escaping notifications, a closure read while lent, and a callback sent
+/// to another thread are in `compile_fail/`. Only the parsed sides reach C, so Miri runs
+/// the rest.
+mod notify_callback {
+    use std::ffi::{CStr, CString};
+    use std::ops::ControlFlow;
+    use std::panic::{self, AssertUnwindSafe};
+    use std::sync::Mutex;
+    use std::thread;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::src::libgit2::checkout::{
+        CheckoutNotification, CheckoutPerfdata, CheckoutPerfdataRef, NotifyCallback,
+        PerfdataCallback,
+    };
+    use libgit2::libgit2::src::libgit2::diff::{Diff, DiffFileRef};
+
+    const CONFLICT: u32 = ffi::GIT_CHECKOUT_NOTIFY_CONFLICT;
+    const UPDATED: u32 = ffi::GIT_CHECKOUT_NOTIFY_UPDATED;
+
+    /// A modification of `file`, then a rename of `old` to `new`.
+    const PATCH: &[u8] = b"diff --git a/file b/file\nindex 1111111..2222222 100644\n\
+        --- a/file\n+++ b/file\n@@ -1 +1 @@\n-old\n+new\n\
+        diff --git a/old b/new\nsimilarity index 100%\nrename from old\nrename to new\n";
+
+    /// A notification as owned data: the reason, the path and each side's path.
+    type Seen = (u32, Option<CString>, [Option<CString>; 3]);
+
+    fn seen(n: CheckoutNotification<'_>) -> Seen {
+        let side = |f: Option<DiffFileRef<'_>>| f.and_then(|f| f.path()).map(CStr::to_owned);
+        let sides = [side(n.baseline), side(n.target), side(n.workdir)];
+        (n.why, n.path.map(CStr::to_owned), sides)
+    }
+
+    fn bare(why: u32, path: Option<&CStr>) -> CheckoutNotification<'_> {
+        CheckoutNotification {
+            why,
+            path,
+            baseline: None,
+            target: None,
+            workdir: None,
+        }
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn sides_libgit2_owns_are_lent_for_the_call() {
+        let mut log = Vec::new();
+        let mut record = |n: CheckoutNotification<'_>| {
+            log.push(seen(n));
+            ControlFlow::Continue(())
+        };
+        let mut callback = NotifyCallback::new(&mut record);
+        let input = PATCH.to_vec();
+        let diff = Diff::from_buffer(&input).unwrap();
+        drop(input);
+        for i in 0..diff.as_ref().len() {
+            let delta = diff.as_ref().get(i).unwrap();
+            let (old, new) = (delta.old_file(), delta.new_file());
+            // As libgit2 lends them: the baseline and target sides, the old file again
+            // as the workdir side, then no side at all.
+            let full = CheckoutNotification {
+                why: CONFLICT,
+                path: old.path(),
+                baseline: Some(old),
+                target: Some(new),
+                workdir: Some(old),
+            };
+            assert_eq!(callback.call(full), ControlFlow::Continue(()));
+            assert_eq!(
+                callback.call(bare(UPDATED, new.path())),
+                ControlFlow::Continue(())
+            );
+        }
+        drop(diff);
+        drop(callback);
+        let some = |s: &CStr| Some(s.to_owned());
+        assert_eq!(
+            log,
+            [
+                (
+                    CONFLICT,
+                    some(c"file"),
+                    [some(c"file"), some(c"file"), some(c"file")]
+                ),
+                (UPDATED, some(c"file"), [None, None, None]),
+                (
+                    CONFLICT,
+                    some(c"old"),
+                    [some(c"old"), some(c"new"), some(c"old")]
+                ),
+                (UPDATED, some(c"new"), [None, None, None]),
+            ]
+        );
+    }
+
+    #[test]
+    fn paths_from_every_source_are_lent_for_the_call() {
+        let mut log = Vec::new();
+        let mut record = |n: CheckoutNotification<'_>| {
+            log.push(seen(n));
+            ControlFlow::Continue(())
+        };
+        let mut callback = NotifyCallback::new(&mut record);
+        // A heap string of exactly its length, freed right after the call.
+        let owned = CString::new("dir/a.txt").unwrap();
+        assert!(callback.call(bare(UPDATED, Some(&owned))).is_continue());
+        drop(owned);
+        // A string inside a larger buffer, a static one, and none.
+        let buffer = b"x/b.txt\0trailing".to_vec();
+        let inner = CStr::from_bytes_until_nul(&buffer).unwrap();
+        assert!(callback.call(bare(UPDATED, Some(inner))).is_continue());
+        drop(buffer);
+        assert!(callback.call(bare(0, Some(c"\xff\xfe"))).is_continue());
+        assert!(callback.call(bare(u32::MAX, None)).is_continue());
+        drop(callback);
+        let paths: Vec<_> = log.into_iter().map(|(why, path, _)| (why, path)).collect();
+        assert_eq!(
+            paths,
+            [
+                (UPDATED, Some(c"dir/a.txt".to_owned())),
+                (UPDATED, Some(c"x/b.txt".to_owned())),
+                (0, Some(c"\xff\xfe".to_owned())),
+                (u32::MAX, None),
+            ]
+        );
+    }
+
+    #[test]
+    fn every_closure_holder_and_its_verdict() {
+        fn refuse_conflicts(n: CheckoutNotification<'_>) -> ControlFlow<()> {
+            if n.why == CONFLICT {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        }
+        let mut item = refuse_conflicts;
+        let mut callback = NotifyCallback::new(&mut item);
+        assert!(callback.call(bare(CONFLICT, None)).is_break());
+        assert!(callback.call(bare(UPDATED, None)).is_continue());
+
+        let mut count = 0;
+        let mut boxed: Box<dyn FnMut(CheckoutNotification<'_>) -> ControlFlow<()> + '_> =
+            Box::new(|_| {
+                count += 1;
+                ControlFlow::Break(())
+            });
+        let mut callback = NotifyCallback::new(&mut boxed);
+        assert!(callback.call(bare(UPDATED, None)).is_break());
+        // A break is no panic: the next call runs the closure again.
+        assert!(callback.call(bare(UPDATED, None)).is_break());
+        drop(callback);
+        drop(boxed);
+        assert_eq!(count, 2);
+
+        // A closure owning its state, lent to the callback and called again after it.
+        let mut owned = {
+            let mut paths = Vec::new();
+            move |n: CheckoutNotification<'_>| {
+                paths.extend(n.path.map(CStr::to_owned));
+                if paths.len() < 2 {
+                    ControlFlow::Continue(())
+                } else {
+                    ControlFlow::Break(())
+                }
+            }
+        };
+        let mut callback = NotifyCallback::new(&mut owned);
+        assert!(callback.call(bare(UPDATED, Some(c"one"))).is_continue());
+        drop(callback);
+        assert!(owned(bare(UPDATED, Some(c"two"))).is_break());
+    }
+
+    #[test]
+    fn a_closure_calls_other_callbacks_reentrantly() {
+        let mut inner_log = Vec::new();
+        let mut counts = 0;
+        {
+            let mut inner = |n: CheckoutNotification<'_>| {
+                inner_log.push(seen(n));
+                ControlFlow::Break(())
+            };
+            let mut perfdata = |_: CheckoutPerfdataRef<'_>| {
+                counts += 1;
+            };
+            let mut outer = |n: CheckoutNotification<'_>| {
+                // A callback within a callback, over the outer call's lent notification.
+                let verdict = NotifyCallback::new(&mut inner).call(n);
+                let zero = CheckoutPerfdata::default();
+                PerfdataCallback::new(&mut perfdata).call(zero.as_ref());
+                verdict
+            };
+            let mut callback = NotifyCallback::new(&mut outer);
+            let path = CString::new("nested").unwrap();
+            assert!(callback.call(bare(CONFLICT, Some(&path))).is_break());
+        }
+        assert_eq!(
+            inner_log,
+            [(CONFLICT, Some(c"nested".to_owned()), [None, None, None])]
+        );
+        assert_eq!(counts, 1);
+    }
+
+    #[test]
+    fn a_panic_resumes_from_call_and_the_callback_runs_again() {
+        let mut calls = Vec::new();
+        let mut f = |n: CheckoutNotification<'_>| {
+            calls.push(n.why);
+            assert_ne!(n.why, CONFLICT, "at {:?}", n.path.map(CStr::to_owned));
+            ControlFlow::Continue(())
+        };
+        let mut callback = NotifyCallback::new(&mut f);
+        assert!(callback.call(bare(UPDATED, None)).is_continue());
+        let path = CString::new("p").unwrap();
+        let caught = panic::catch_unwind(AssertUnwindSafe(|| {
+            callback.call(bare(CONFLICT, Some(&path)))
+        }));
+        drop(path);
+        // The closure's own panic payload, its message included, comes back unchanged.
+        let message = caught.unwrap_err().downcast::<String>().unwrap();
+        assert!(message.contains("at Some(\"p\")"), "{message}");
+        assert_eq!(
+            format!("{callback:?}"),
+            "NotifyCallback { panicked: false, .. }"
+        );
+        assert!(callback.call(bare(UPDATED, None)).is_continue());
+        drop(callback);
+        assert_eq!(calls, [UPDATED, CONFLICT, UPDATED]);
+    }
+
+    #[test]
+    fn callbacks_on_threads_share_only_a_lock() {
+        let shared = Mutex::new(Vec::new());
+        thread::scope(|s| {
+            for t in 0..4_u32 {
+                let shared = &shared;
+                s.spawn(move || {
+                    let mut breaks = 0;
+                    let mut f = |n: CheckoutNotification<'_>| {
+                        let path = n.path.map(CStr::to_owned);
+                        shared.lock().unwrap().push((t, path, n.why));
+                        if n.why.is_multiple_of(2) {
+                            ControlFlow::Continue(())
+                        } else {
+                            breaks += 1;
+                            ControlFlow::Break(())
+                        }
+                    };
+                    let mut callback = NotifyCallback::new(&mut f);
+                    for why in 0..50 {
+                        let path = CString::new(format!("t{t}/{why}")).unwrap();
+                        let verdict = callback.call(bare(why, Some(&path)));
+                        assert_eq!(verdict.is_break(), !why.is_multiple_of(2));
+                    }
+                    drop(callback);
+                    assert_eq!(breaks, 25);
+                });
+            }
+        });
+        let shared = shared.into_inner().unwrap();
+        assert_eq!(shared.len(), 200);
+        assert!(
+            shared
+                .iter()
+                .all(|(t, p, w)| p.as_deref().unwrap().to_str().unwrap() == format!("t{t}/{w}"))
+        );
+    }
+}
+
+/// The `PerfdataCallback` tests: it is called through its `extern "C"` trampoline, as
+/// libgit2 calls it, and lends its closure the counters for the call only: those of Rust
+/// values, of copies and of exclusive handles (Miri, `BSan`). A panic never crosses the
+/// trampoline and resumes from `call`. Callbacks run on several threads at once (`TSan`).
+/// Escaping counters and a callback sent to another thread are in `compile_fail/`. None of
+/// this reaches C, so Miri runs it.
+mod perfdata_callback {
+    use std::panic::{self, AssertUnwindSafe};
+    use std::sync::Mutex;
+    use std::thread;
+
+    use libgit2::libgit2::src::libgit2::checkout::{
+        CheckoutPerfdata, CheckoutPerfdataRef, PerfdataCallback,
+    };
+
+    fn counts(mkdir: usize, stat: usize, chmod: usize) -> CheckoutPerfdata {
+        let mut counts = CheckoutPerfdata::default();
+        let mut m = counts.as_mut();
+        m.set_mkdir_calls(mkdir);
+        m.set_stat_calls(stat);
+        m.set_chmod_calls(chmod);
+        counts
+    }
+
+    #[test]
+    fn counters_from_every_holder_are_lent_for_the_call() {
+        let mut seen = Vec::new();
+        let mut record = |d: CheckoutPerfdataRef<'_>| seen.push(d.copied());
+        let mut callback = PerfdataCallback::new(&mut record);
+        let mut value = counts(1, 2, 3);
+        callback.call(value.as_ref());
+        // Through an exclusive handle's shared reborrow, then a write, then again.
+        {
+            let mut exclusive = value.as_mut();
+            callback.call(exclusive.as_ref());
+            exclusive.set_stat_calls(usize::MAX);
+            callback.call(exclusive.as_ref());
+        }
+        // A boxed copy, freed right after the call.
+        let boxed = Box::new(value.as_ref().copied());
+        callback.call(boxed.as_ref().as_ref());
+        drop(boxed);
+        drop(callback);
+        assert_eq!(
+            seen,
+            [
+                counts(1, 2, 3),
+                counts(1, 2, 3),
+                counts(1, usize::MAX, 3),
+                counts(1, usize::MAX, 3)
+            ]
+        );
+    }
+
+    #[test]
+    fn every_closure_holder() {
+        fn check(d: CheckoutPerfdataRef<'_>) {
+            assert!(d.mkdir_calls() <= d.stat_calls());
+        }
+        let mut item = check;
+        PerfdataCallback::new(&mut item).call(counts(1, 2, 0).as_ref());
+
+        let mut total = 0;
+        let mut boxed: Box<dyn FnMut(CheckoutPerfdataRef<'_>) + '_> =
+            Box::new(|d| total += d.stat_calls());
+        let mut callback = PerfdataCallback::new(&mut boxed);
+        callback.call(counts(0, 5, 0).as_ref());
+        callback.call(counts(0, 7, 0).as_ref());
+        drop(callback);
+        drop(boxed);
+        assert_eq!(total, 12);
+    }
+
+    #[test]
+    fn a_panic_resumes_from_call_and_the_callback_runs_again() {
+        let mut calls = 0;
+        let mut f = |d: CheckoutPerfdataRef<'_>| {
+            calls += 1;
+            assert_ne!(d.chmod_calls(), 1, "chmod");
+        };
+        let mut callback = PerfdataCallback::new(&mut f);
+        let one = counts(0, 0, 1);
+        let caught = panic::catch_unwind(AssertUnwindSafe(|| callback.call(one.as_ref())));
+        let message = caught.unwrap_err().downcast::<String>().unwrap();
+        assert!(message.contains("chmod"), "{message}");
+        assert_eq!(
+            format!("{callback:?}"),
+            "PerfdataCallback { panicked: false, .. }"
+        );
+        callback.call(counts(0, 0, 2).as_ref());
+        drop(callback);
+        assert_eq!(calls, 2);
+    }
+
+    #[test]
+    fn callbacks_on_threads_share_only_a_lock() {
+        let shared = Mutex::new(0_usize);
+        let value = counts(1, 2, 3);
+        thread::scope(|s| {
+            for _ in 0..4 {
+                let (shared, value) = (&shared, &value);
+                s.spawn(move || {
+                    let mut f = |d: CheckoutPerfdataRef<'_>| {
+                        *shared.lock().unwrap() += d.stat_calls();
+                    };
+                    let mut callback = PerfdataCallback::new(&mut f);
+                    for _ in 0..50 {
+                        // A value shared by every thread, lent to each call.
+                        callback.call(value.as_ref());
+                    }
+                });
+            }
+        });
+        assert_eq!(shared.into_inner().unwrap(), 4 * 50 * 2);
+    }
+}

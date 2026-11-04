@@ -1,0 +1,12 @@
+error[E0502]: cannot borrow `whys` as immutable because it is also borrowed as mutable
+  --> tests/ub_safe/compile_fail/checkout_notify_callback_borrows_closure.rs:16:16
+   |
+ 9 |     let mut f = |n: CheckoutNotification<'_>| {
+   |                 ----------------------------- mutable borrow occurs here
+10 |         whys.push(n.why);
+   |         ---- first borrow occurs due to use of `whys` in closure
+...
+16 |     assert_eq!(whys.len(), 1);
+   |                ^^^^ immutable borrow occurs here
+17 |     let _ = callback.call(n);
+   |             -------- mutable borrow later used here

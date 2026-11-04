@@ -1,0 +1,28 @@
+error[E0277]: `dyn for<'a> FnMut(CheckoutPerfdataRef<'a>)` cannot be sent between threads safely
+  --> tests/ub_safe/compile_fail/checkout_perfdata_callback_not_send.rs:11:17
+   |
+11 |         s.spawn(move || drop(callback));
+   |           ----- -------^^^^^^^^^^^^^^^
+   |           |     |
+   |           |     `dyn for<'a> FnMut(CheckoutPerfdataRef<'a>)` cannot be sent between threads safely
+   |           |     within this `{closure@$DIR/tests/ub_safe/compile_fail/checkout_perfdata_callback_not_send.rs:11:17: 11:24}`
+   |           required by a bound introduced by this call
+   |
+   = help: within `{closure@$DIR/tests/ub_safe/compile_fail/checkout_perfdata_callback_not_send.rs:11:17: 11:24}`, the trait `Send` is not implemented for `dyn for<'a> FnMut(CheckoutPerfdataRef<'a>)`
+   = note: required because it appears within the type `&mut dyn for<'a> FnMut(CheckoutPerfdataRef<'a>)`
+note: required because it appears within the type `PerfdataCallback<'_>`
+  --> src/libgit2/src/libgit2/checkout.rs
+   |
+   | pub struct PerfdataCallback<'f> {
+   |            ^^^^^^^^^^^^^^^^
+note: required because it's used within this closure
+  --> tests/ub_safe/compile_fail/checkout_perfdata_callback_not_send.rs:11:17
+   |
+11 |         s.spawn(move || drop(callback));
+   |                 ^^^^^^^
+note: required by a bound in `Scope::<'scope, 'env>::spawn`
+  --> $RUST/std/src/thread/scoped.rs
+help: use parentheses to call this trait object
+   |
+11 |         s.spawn((move || drop(callback))(/* CheckoutPerfdataRef<'_> */));
+   |                 +                      ++++++++++++++++++++++++++++++++

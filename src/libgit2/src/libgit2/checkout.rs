@@ -25,9 +25,11 @@
 //! [`IndexBox`](crate::libgit2::src::libgit2::index::IndexBox) or
 //! [`IndexArc`](crate::libgit2::src::libgit2::index::IndexArc) holding it, and the baseline
 //! tree as a [`TreeRef`], from the [`TreeArc`](crate::libgit2::src::libgit2::tree::TreeArc)
-//! holding it. The pointers whose types this crate does not wrap yet stay raw seams,
-//! with `unsafe` setters whose callers vouch for what the borrow checker cannot: the
-//! notification, progress and performance callbacks with their payloads. The flags fields take the
+//! holding it. The callbacks and their payloads stay raw seams, with `unsafe` setters
+//! whose callers vouch for what the borrow checker cannot: the safe forms of the
+//! notification, progress and performance callbacks ([`NotifyCallback`],
+//! [`ProgressCallback`], [`PerfdataCallback`]) are handed to libgit2 by the wrappers of
+//! the checkout routines, for the call. The flags fields take the
 //! raw bits of `git_checkout_strategy_t` and `git_checkout_notify_t` until those are wrapped.
 //!
 //! `git_rebase_init` and `git_rebase_open` are the one exception to "read during the
@@ -56,21 +58,47 @@
 //! resume a panic its closure raised once C has returned; the options' own
 //! [`set_progress_callback`](CheckoutOptionsMut::set_progress_callback) stays a raw seam
 //! for C callbacks.
+//!
+//! # Notification callbacks
+//!
+//! A [`NotifyCallback`] is a `git_checkout_notify_cb` over a Rust closure. A checkout calls
+//! one synchronously, on its own thread, while it plans and before it writes anything: once
+//! per path in a situation its [`notify_flags`](CheckoutOptionsRef::notify_flags) select,
+//! lending it the path and the baseline, target and working-directory sides of it, as
+//! [`DiffFileRef`]s, for the call alone. The closure returns [`ControlFlow::Break`] to
+//! cancel, which the callback reports as `GIT_EUSER`, the code the checkout then fails
+//! with; a panic cancels the same way and resumes once C has returned.
+//!
+//! # Performance-data callbacks
+//!
+//! A [`PerfdataCallback`] is a `git_checkout_perfdata_cb` over a Rust closure, which a
+//! checkout calls once, synchronously, when it has written everything, lending it its
+//! counters as a [`CheckoutPerfdataRef`] for the call. Like the progress callback, it
+//! returns nothing and cannot fail the checkout.
+//!
+//! The wrappers of the checkout routines hand both to libgit2 as they hand a
+//! [`ProgressCallback`], for the call only; the options' own
+//! [`set_notify_callback`](CheckoutOptionsMut::set_notify_callback) and
+//! [`set_perfdata_callback`](CheckoutOptionsMut::set_perfdata_callback) stay raw seams for C
+//! callbacks.
 
 use core::any::Any;
 use core::ffi::{CStr, c_char, c_int, c_void};
 use core::fmt;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
+use core::ops::ControlFlow;
 use core::ptr::{self};
 use std::panic::{self, AssertUnwindSafe};
 
 use ffibox::{CBorrowedPtr, CCell, CMutSeam, CRefSeam, CZeroable, define_ctype};
 
 use crate::ffi;
+use crate::libgit2::src::libgit2::diff::DiffFileRef;
 use crate::libgit2::src::libgit2::index::IndexRef;
 use crate::libgit2::src::libgit2::strarray::StrArrayRef;
 use crate::libgit2::src::libgit2::tree::TreeRef;
+use crate::libgit2::src::util::errors::ErrorCode;
 
 /// Options for a checkout (`git_checkout_options`), held by value in Rust storage.
 ///
@@ -335,8 +363,9 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
 
     /// The notification callback and its payload; `None` and NULL by default.
     ///
-    /// Raw seam: the callback is `git_checkout_notify_cb`, which this crate does not
-    /// wrap yet.
+    /// Raw seam: the fields hold whatever C callback and payload were stored. The safe
+    /// form of the callback is a [`NotifyCallback`], which the wrappers of the checkout
+    /// routines hand to libgit2 for the call.
     ///
     /// Wraps `fld::git_checkout_options.notify_cb`
     /// Wraps `fld::git_checkout_options.notify_payload`
@@ -384,8 +413,9 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
 
     /// The performance-data callback and its payload; `None` and NULL by default.
     ///
-    /// Raw seam: the callback is `git_checkout_perfdata_cb`, which this crate does not
-    /// wrap yet.
+    /// Raw seam: the fields hold whatever C callback and payload were stored. The safe
+    /// form of the callback is a [`PerfdataCallback`], which the wrappers of the checkout
+    /// routines hand to libgit2 for the call.
     ///
     /// Wraps `fld::git_checkout_options.perfdata_cb`
     /// Wraps `fld::git_checkout_options.perfdata_payload`
@@ -677,8 +707,9 @@ impl<'o> CheckoutOptionsMut<'_, 'o> {
     /// [`notify_flags`](CheckoutOptionsRef::notify_flags), before it changes any file;
     /// a non-zero return cancels the checkout, which returns that value.
     ///
-    /// Raw seam: the callback is `git_checkout_notify_cb`, which this crate does not
-    /// wrap yet.
+    /// Raw seam: stores a C callback and payload as given. The safe form of the callback
+    /// is a [`NotifyCallback`], which the wrappers of the checkout routines hand to
+    /// libgit2 for the call, with its panics contained.
     ///
     /// # Safety
     ///
@@ -747,8 +778,9 @@ impl<'o> CheckoutOptionsMut<'_, 'o> {
     /// `mkdir`, `stat` and `chmod` calls it made, which the callback reads by borrowing a
     /// [`CheckoutPerfdataRef`] over its `perfdata` argument for the call.
     ///
-    /// Raw seam: the callback is `git_checkout_perfdata_cb`, which this crate does not
-    /// wrap yet.
+    /// Raw seam: stores a C callback and payload as given. The safe form of the callback
+    /// is a [`PerfdataCallback`], which the wrappers of the checkout routines hand to
+    /// libgit2 for the call, with its panics contained.
     ///
     /// # Safety
     ///
@@ -1260,6 +1292,358 @@ unsafe extern "C" fn progress_with(
     }
 }
 
+/// What a [`NotifyCallback`] is told about one path, lent for the call: the arguments of a
+/// `git_checkout_notify_cb` but its payload.
+///
+/// Every borrow is valid for `'a`, the call: the path and the files belong to the
+/// checkout's diff and iterators, and the workdir file is a copy on its stack.
+#[derive(Clone, Copy)]
+pub struct CheckoutNotification<'a> {
+    /// The one `GIT_CHECKOUT_NOTIFY_*` bit naming the situation: a conflict, a dirty file,
+    /// an update, an untracked or an ignored file.
+    pub why: u32,
+    /// The path, relative to the working directory. libgit2 always passes one; a NULL
+    /// path is read as `None` rather than invented.
+    pub path: Option<&'a CStr>,
+    /// The file the working directory was expected to hold; `None` for a path the
+    /// baseline does not have.
+    pub baseline: Option<DiffFileRef<'a>>,
+    /// The file the checkout writes; `None` for a path it removes.
+    pub target: Option<DiffFileRef<'a>>,
+    /// The file found in the working directory; `None` for a path missing on disk.
+    pub workdir: Option<DiffFileRef<'a>>,
+}
+
+impl fmt::Debug for CheckoutNotification<'_> {
+    /// Each side by its path; a side without one as the empty path.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fn side(file: Option<DiffFileRef<'_>>) -> Option<&CStr> {
+            file.map(|file| file.path().unwrap_or_default())
+        }
+        f.debug_struct("CheckoutNotification")
+            .field("why", &format_args!("{:#x}", self.why))
+            .field("path", &self.path)
+            .field("baseline", &side(self.baseline))
+            .field("target", &side(self.target))
+            .field("workdir", &side(self.workdir))
+            .finish()
+    }
+}
+
+/// The closure behind a [`NotifyCallback`].
+type NotifyFn<'f> = dyn FnMut(CheckoutNotification<'_>) -> ControlFlow<()> + 'f;
+
+/// A `git_checkout_notify_cb`: the callback a checkout calls, before it changes any file,
+/// for each path in one of the situations its options'
+/// [`notify_flags`](CheckoutOptionsRef::notify_flags) select, and which may cancel it.
+///
+/// Built over a closure with [`new`](Self::new). libgit2 calls it synchronously, on the
+/// thread running the checkout, while it plans what to do and before it writes anything
+/// (a dry run plans, so it notifies too):
+/// once per conflicting, dirty, updated, untracked or ignored path, with a
+/// [`CheckoutNotification`]: the `GIT_CHECKOUT_NOTIFY_*` bit naming the situation, the
+/// path, and the sides of it that exist, each a [`DiffFileRef`]. Everything is lent for the
+/// call only, so the closure receives borrows that cannot outlive the call.
+///
+/// The closure returns [`ControlFlow::Continue`] to go on and [`ControlFlow::Break`] to
+/// cancel, which the trampoline reports as `GIT_EUSER`: the checkout stops before
+/// writing anything and fails with that code. A panic in the closure does not cross into
+/// C: the trampoline cancels with `GIT_EUSER`, every later call it gets cancels again
+/// without running the closure, and the panic resumes once control is back in Rust, from
+/// [`call`](Self::call) or from the wrapper that ran the checkout.
+///
+/// ```
+/// use std::ffi::CStr;
+/// use std::ops::ControlFlow;
+///
+/// use libgit2::ffi;
+/// use libgit2::libgit2::src::libgit2::checkout::{CheckoutNotification, NotifyCallback};
+///
+/// let mut dirty = Vec::new();
+/// let mut refuse_dirty = |n: CheckoutNotification<'_>| {
+///     if n.why == ffi::GIT_CHECKOUT_NOTIFY_DIRTY {
+///         dirty.extend(n.path.map(CStr::to_owned));
+///         ControlFlow::Break(())
+///     } else {
+///         ControlFlow::Continue(())
+///     }
+/// };
+/// let mut callback = NotifyCallback::new(&mut refuse_dirty);
+/// let notification = |why, path| CheckoutNotification {
+///     why,
+///     path: Some(path),
+///     baseline: None,
+///     target: None,
+///     workdir: None,
+/// };
+/// let updated = notification(ffi::GIT_CHECKOUT_NOTIFY_UPDATED, c"a.txt");
+/// assert_eq!(callback.call(updated), ControlFlow::Continue(()));
+/// let dirty_file = notification(ffi::GIT_CHECKOUT_NOTIFY_DIRTY, c"b.txt");
+/// assert_eq!(callback.call(dirty_file), ControlFlow::Break(()));
+/// drop(callback);
+/// assert_eq!(dirty, [c"b.txt".to_owned()]);
+/// ```
+///
+/// Wraps `ty::git_checkout_notify_cb`
+#[doc(alias = "git_checkout_notify_cb")]
+pub struct NotifyCallback<'f> {
+    f: &'f mut NotifyFn<'f>,
+    /// A panic the closure raised inside C, resumed once control is back in Rust.
+    panic: Option<Box<dyn Any + Send + 'static>>,
+}
+
+impl<'f> NotifyCallback<'f> {
+    /// The callback that calls `f` with each notification, until it breaks.
+    pub fn new<F>(f: &'f mut F) -> Self
+    where
+        F: FnMut(CheckoutNotification<'_>) -> ControlFlow<()> + 'f,
+    {
+        Self { f, panic: None }
+    }
+
+    /// Calls the callback with `notification`, through the trampoline libgit2 calls, and
+    /// returns what libgit2 would read from it: [`ControlFlow::Break`] for a cancel. A panic
+    /// of the closure resumes here.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic but by resuming the closure's panic: the trampoline is never NULL"
+    )]
+    pub fn call(&mut self, notification: CheckoutNotification<'_>) -> ControlFlow<()> {
+        let CheckoutNotification {
+            why,
+            path,
+            baseline,
+            target,
+            workdir,
+        } = notification;
+        let file = |f: Option<DiffFileRef<'_>>| f.map_or(ptr::null(), |f| f.as_ptr());
+        let rc = self.walk_with(|callback, payload| {
+            let callback = callback.expect("the trampoline is never NULL");
+            let path = path.map_or(ptr::null(), CStr::as_ptr);
+            // SAFETY: `payload` is this callback, which nothing else uses during the call;
+            // `path` NULL or a NUL-terminated string, and each file NULL or a live diff file,
+            // all borrowed for the call, which only reads them: the trampoline's contract.
+            unsafe {
+                callback(
+                    why,
+                    path,
+                    file(baseline),
+                    file(target),
+                    file(workdir),
+                    payload,
+                )
+            }
+        });
+        if rc == 0 {
+            ControlFlow::Continue(())
+        } else {
+            ControlFlow::Break(())
+        }
+    }
+
+    /// Runs `walk` with the C callback and its payload, as the wrapper of a routine that
+    /// checks out (`git_checkout_head`, `git_checkout_index`, `git_checkout_tree`, and the
+    /// routines that check out through them) stores them in the options it hands to C,
+    /// then resumes a panic the closure raised meanwhile. The payload is this callback,
+    /// which nothing else touches until `walk` returns; libgit2 must be done calling it by
+    /// then.
+    ///
+    /// A walk that unwinds itself, rather than returning, leaves a panic of the closure
+    /// behind; it belonged to that walk, so it is dropped here, before the walk it would
+    /// otherwise cancel and resume from.
+    pub(crate) fn walk_with<R>(
+        &mut self,
+        walk: impl FnOnce(ffi::git_checkout_notify_cb, *mut c_void) -> R,
+    ) -> R {
+        self.panic = None;
+        let result = walk(Some(notify_with), ptr::from_mut(self).cast());
+        if let Some(panic) = self.panic.take() {
+            panic::resume_unwind(panic);
+        }
+        result
+    }
+}
+
+impl fmt::Debug for NotifyCallback<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("NotifyCallback")
+            .field("panicked", &self.panic.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+/// `git_checkout_notify_cb` over a [`NotifyCallback`]'s closure.
+///
+/// # Safety
+///
+/// `payload` must address a live [`NotifyCallback`] that nothing else uses during the
+/// call, `path` be NULL or a NUL-terminated string, and `baseline`, `target` and
+/// `workdir` each NULL or a `git_diff_file` whose path is NULL or such a string, all live
+/// and unchanged for the call.
+unsafe extern "C" fn notify_with(
+    why: ffi::git_checkout_notify_t,
+    path: *const c_char,
+    baseline: *const ffi::git_diff_file,
+    target: *const ffi::git_diff_file,
+    workdir: *const ffi::git_diff_file,
+    payload: *mut c_void,
+) -> c_int {
+    // SAFETY: per this function's contract, `payload` is a live callback borrowed for the
+    // call alone.
+    let callback = unsafe { &mut *payload.cast::<NotifyCallback<'_>>() };
+    if callback.panic.is_some() {
+        return ErrorCode::User.raw();
+    }
+    // SAFETY: per this function's contract, a non-NULL `path` is a NUL-terminated string
+    // live and unchanged for the call; the borrow ends with it, since the closure is
+    // generic over the string's lifetime.
+    let path = (!path.is_null()).then(|| unsafe { CStr::from_ptr(path) });
+    // SAFETY: per this function's contract, each file is NULL, read as `None`, or live and
+    // unchanged for the call; the closure only reads it, through a handle that cannot
+    // outlive the call, since the closure is generic over its lifetime.
+    let file = |f: *const ffi::git_diff_file| unsafe { DiffFileRef::from_ptr(f.cast_mut()) };
+    let notification = CheckoutNotification {
+        why,
+        path,
+        baseline: file(baseline),
+        target: file(target),
+        workdir: file(workdir),
+    };
+    match panic::catch_unwind(AssertUnwindSafe(|| (callback.f)(notification))) {
+        Ok(ControlFlow::Continue(())) => 0,
+        Ok(ControlFlow::Break(())) => ErrorCode::User.raw(),
+        Err(panic) => {
+            callback.panic = Some(panic);
+            ErrorCode::User.raw()
+        }
+    }
+}
+
+/// The closure behind a [`PerfdataCallback`].
+type PerfdataFn<'f> = dyn FnMut(CheckoutPerfdataRef<'_>) + 'f;
+
+/// A `git_checkout_perfdata_cb`: the callback a checkout calls once it has written
+/// everything, with the filesystem calls it made, as a [`CheckoutPerfdataRef`].
+///
+/// Built over a closure with [`new`](Self::new). libgit2 calls it synchronously, on the
+/// thread running the checkout, exactly once per checkout that gets through its writes,
+/// before it writes the index, lending it the counters it kept in its own state for the
+/// call alone: the closure receives them as a handle that cannot outlive the call, and
+/// keeps a [`copied`](CheckoutPerfdataRef::copied) value. A dry run, and a checkout that
+/// fails or is cancelled before then, never call it.
+///
+/// The callback returns nothing, so it cannot fail the checkout. A panic in the closure
+/// does not cross into C: the checkout goes on, and the panic resumes once control is
+/// back in Rust, from [`call`](Self::call) or from the wrapper that ran the checkout.
+///
+/// ```
+/// use libgit2::libgit2::src::libgit2::checkout::{
+///     CheckoutPerfdata, CheckoutPerfdataRef, PerfdataCallback,
+/// };
+///
+/// let mut seen = Vec::new();
+/// let mut record = |perfdata: CheckoutPerfdataRef<'_>| seen.push(perfdata.copied());
+/// let mut callback = PerfdataCallback::new(&mut record);
+/// let mut counts = CheckoutPerfdata::default();
+/// counts.as_mut().set_mkdir_calls(2);
+/// counts.as_mut().set_stat_calls(5);
+/// callback.call(counts.as_ref());
+/// drop(callback);
+/// assert_eq!(seen, [counts]);
+/// ```
+///
+/// Wraps `ty::git_checkout_perfdata_cb`
+#[doc(alias = "git_checkout_perfdata_cb")]
+pub struct PerfdataCallback<'f> {
+    f: &'f mut PerfdataFn<'f>,
+    /// A panic the closure raised inside C, resumed once control is back in Rust.
+    panic: Option<Box<dyn Any + Send + 'static>>,
+}
+
+impl<'f> PerfdataCallback<'f> {
+    /// The callback that calls `f` with each checkout's counters.
+    pub fn new<F>(f: &'f mut F) -> Self
+    where
+        F: FnMut(CheckoutPerfdataRef<'_>) + 'f,
+    {
+        Self { f, panic: None }
+    }
+
+    /// Calls the callback with `perfdata`, through the trampoline libgit2 calls. A panic
+    /// of the closure resumes here.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic but by resuming the closure's panic: the trampoline is never NULL"
+    )]
+    pub fn call(&mut self, perfdata: CheckoutPerfdataRef<'_>) {
+        self.walk_with(|callback, payload| {
+            let callback = callback.expect("the trampoline is never NULL");
+            // SAFETY: `payload` is this callback, which nothing else uses during the call;
+            // `perfdata` live counters, lent for the call, which only reads them: the
+            // trampoline's contract.
+            unsafe { callback(perfdata.as_ptr(), payload) }
+        });
+    }
+
+    /// Runs `walk` with the C callback and its payload, as the wrapper of a routine that
+    /// checks out (`git_checkout_head`, `git_checkout_index`, `git_checkout_tree`, and the
+    /// routines that check out through them) stores them in the options it hands to C,
+    /// then resumes a panic the closure raised meanwhile. The payload is this callback,
+    /// which nothing else touches until `walk` returns; libgit2 must be done calling it by
+    /// then.
+    ///
+    /// A walk that unwinds itself, rather than returning, leaves a panic of the closure
+    /// behind; it belonged to that walk, so it is dropped here, before the walk it would
+    /// otherwise skip the closure in and resume from.
+    pub(crate) fn walk_with<R>(
+        &mut self,
+        walk: impl FnOnce(ffi::git_checkout_perfdata_cb, *mut c_void) -> R,
+    ) -> R {
+        self.panic = None;
+        let result = walk(Some(perfdata_with), ptr::from_mut(self).cast());
+        if let Some(panic) = self.panic.take() {
+            panic::resume_unwind(panic);
+        }
+        result
+    }
+}
+
+impl fmt::Debug for PerfdataCallback<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PerfdataCallback")
+            .field("panicked", &self.panic.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+/// `git_checkout_perfdata_cb` over a [`PerfdataCallback`]'s closure.
+///
+/// # Safety
+///
+/// `payload` must address a live [`PerfdataCallback`] that nothing else uses during the
+/// call, and `perfdata` be NULL or a `git_checkout_perfdata` live and unchanged for the
+/// call.
+unsafe extern "C" fn perfdata_with(
+    perfdata: *const ffi::git_checkout_perfdata,
+    payload: *mut c_void,
+) {
+    // SAFETY: per this function's contract, `payload` is a live callback borrowed for the
+    // call alone.
+    let callback = unsafe { &mut *payload.cast::<PerfdataCallback<'_>>() };
+    if callback.panic.is_some() {
+        return;
+    }
+    // SAFETY: per this function's contract, a non-NULL `perfdata` is live and unchanged for
+    // the call; the closure only reads it, through a handle that cannot outlive the call.
+    let Some(perfdata) = (unsafe { CheckoutPerfdataRef::from_ptr(perfdata.cast_mut()) }) else {
+        // libgit2 always lends its counters; skip the closure rather than invent them.
+        return;
+    };
+    if let Err(panic) = panic::catch_unwind(AssertUnwindSafe(|| (callback.f)(perfdata))) {
+        callback.panic = Some(panic);
+    }
+}
+
 #[cfg(test)]
 mod unit_tests {
     use std::ffi::CString;
@@ -1755,6 +2139,559 @@ mod unit_tests {
         assert_eq!(moved, 3);
     }
 
+    /// The notification and performance-data callbacks' tests, over the progress tests'
+    /// fixture.
+    mod notify_and_perfdata_callbacks {
+        use std::fs;
+        use std::path::Path;
+
+        use super::progress_callback::{FILES, FORCE, Staged};
+        use super::*;
+
+        const DRY_RUN: u32 = 1 << 24;
+        const UPDATED: u32 = ffi::GIT_CHECKOUT_NOTIFY_UPDATED;
+        const UNTRACKED: u32 = ffi::GIT_CHECKOUT_NOTIFY_UNTRACKED;
+        const CONFLICT: u32 = ffi::GIT_CHECKOUT_NOTIFY_CONFLICT;
+        const USER: c_int = ffi::GIT_EUSER;
+
+        /// One side of a notification, as owned data: its path, mode and size.
+        type Side = Option<(Option<CString>, u16, u64)>;
+
+        /// One notification: the reason, the path and the baseline, target and workdir
+        /// sides.
+        type Note = (u32, Option<CString>, Side, Side, Side);
+
+        fn side(file: Option<DiffFileRef<'_>>) -> Side {
+            file.map(|f| (f.path().map(CStr::to_owned), f.mode(), f.size()))
+        }
+
+        fn note(n: CheckoutNotification<'_>) -> Note {
+            let path = n.path.map(CStr::to_owned);
+            (
+                n.why,
+                path,
+                side(n.baseline),
+                side(n.target),
+                side(n.workdir),
+            )
+        }
+
+        /// A notification without sides.
+        fn bare(why: u32, path: Option<&CStr>) -> CheckoutNotification<'_> {
+            CheckoutNotification {
+                why,
+                path,
+                baseline: None,
+                target: None,
+                workdir: None,
+            }
+        }
+
+        /// Fills `dir` as a stale working directory: `a.txt` changed, `dir/b.txt` as
+        /// staged, `dir/sub/c.txt` missing and an untracked `extra.txt`.
+        fn dirty(dir: &Path) {
+            fs::create_dir_all(dir.join("dir")).unwrap();
+            fs::write(dir.join("a.txt"), "changed\n").unwrap();
+            fs::write(dir.join("dir/b.txt"), "two\n").unwrap();
+            fs::write(dir.join("extra.txt"), "x\n").unwrap();
+        }
+
+        /// Checks the index out into `target` with `strategy`, notifying on everything,
+        /// with the callbacks `walk_with` lends, and returns libgit2's code.
+        fn checkout(
+            staged: &Staged,
+            target: &CStr,
+            strategy: u32,
+            notify: &mut NotifyCallback<'_>,
+            perfdata: &mut PerfdataCallback<'_>,
+        ) -> c_int {
+            let mut options = CheckoutOptions::new();
+            options.as_mut().set_strategy(strategy);
+            options
+                .as_mut()
+                .set_notify_flags(ffi::GIT_CHECKOUT_NOTIFY_ALL);
+            options.as_mut().set_target_directory(Some(target));
+            notify.walk_with(|notify_cb, notify_payload| {
+                perfdata.walk_with(|perfdata_cb, perfdata_payload| {
+                    let mut m = options.as_mut();
+                    // SAFETY: the trampolines are sound for any arguments libgit2 passes,
+                    // and each payload stays valid until its walk returns, after the
+                    // checkout, which is the options' only use.
+                    unsafe { m.set_notify_callback(notify_cb, notify_payload) };
+                    // SAFETY: as above.
+                    unsafe { m.set_perfdata_callback(perfdata_cb, perfdata_payload) };
+                    // SAFETY: the live repository and index; live options, whose pointers
+                    // are live or NULL, read for the call.
+                    unsafe {
+                        ffi::git_checkout_index(
+                            staged.repo,
+                            staged.index,
+                            options.as_ref().as_ptr(),
+                        )
+                    }
+                })
+            })
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls C")]
+        fn libgit2_notifies_every_path_with_its_sides_then_reports_its_counts() {
+            let staged = Staged::new("notify-report", FILES);
+            let (path, target) = staged.target("out");
+            dirty(&path);
+            let mut notes = Vec::new();
+            let mut record = |n: CheckoutNotification<'_>| {
+                notes.push(note(n));
+                ControlFlow::Continue(())
+            };
+            let mut counts = Vec::new();
+            let mut count = |d: CheckoutPerfdataRef<'_>| counts.push(d.copied());
+            let mut notify = NotifyCallback::new(&mut record);
+            let mut perfdata = PerfdataCallback::new(&mut count);
+            let rc = checkout(&staged, &target, FORCE, &mut notify, &mut perfdata);
+            drop((notify, perfdata));
+            assert_eq!(rc, 0);
+            let file = |p: &CStr, size| Some((Some(p.to_owned()), 0o100_644, size));
+            assert_eq!(
+                notes,
+                [
+                    (
+                        UPDATED,
+                        Some(c"a.txt".to_owned()),
+                        None,
+                        file(c"a.txt", 4),
+                        file(c"a.txt", 8)
+                    ),
+                    (
+                        UPDATED,
+                        Some(c"dir/b.txt".to_owned()),
+                        None,
+                        file(c"dir/b.txt", 4),
+                        file(c"dir/b.txt", 4)
+                    ),
+                    (
+                        UPDATED,
+                        Some(c"dir/sub/c.txt".to_owned()),
+                        None,
+                        file(c"dir/sub/c.txt", 6),
+                        None
+                    ),
+                    (
+                        UNTRACKED,
+                        Some(c"extra.txt".to_owned()),
+                        None,
+                        None,
+                        file(c"extra.txt", 2)
+                    ),
+                ]
+            );
+            // Once, after the writes: `dir/sub` had to be made.
+            assert_eq!(counts.len(), 1);
+            assert!(counts[0].as_ref().mkdir_calls() >= 1, "{counts:?}");
+            assert!(counts[0].as_ref().stat_calls() >= 1, "{counts:?}");
+            assert_eq!(fs::read(path.join("a.txt")).unwrap(), b"one\n");
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls C")]
+        fn a_break_cancels_before_any_write_and_skips_the_counts() {
+            let staged = Staged::new("notify-break", FILES);
+            let (path, target) = staged.target("out");
+            dirty(&path);
+            let mut calls = 0;
+            let mut refuse = |n: CheckoutNotification<'_>| {
+                calls += 1;
+                if n.why == UNTRACKED {
+                    ControlFlow::Break(())
+                } else {
+                    ControlFlow::Continue(())
+                }
+            };
+            let mut counted = 0;
+            let mut count = |_: CheckoutPerfdataRef<'_>| counted += 1;
+            let mut notify = NotifyCallback::new(&mut refuse);
+            let mut perfdata = PerfdataCallback::new(&mut count);
+            let rc = checkout(&staged, &target, FORCE, &mut notify, &mut perfdata);
+            drop((notify, perfdata));
+            assert_eq!((rc, calls, counted), (USER, 4, 0));
+            // Nothing was written: the stale file stands, the missing one is still missing.
+            assert_eq!(fs::read(path.join("a.txt")).unwrap(), b"changed\n");
+            assert!(!path.join("dir/sub/c.txt").exists());
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls C")]
+        fn a_safe_checkout_notifies_conflicts_and_a_dry_run_counts_nothing() {
+            let staged = Staged::new("notify-conflict", FILES);
+            let (path, target) = staged.target("out");
+            dirty(&path);
+            for (strategy, expected) in [(0, ffi::GIT_ECONFLICT), (FORCE | DRY_RUN, 0)] {
+                let mut whys = Vec::new();
+                let mut record = |n: CheckoutNotification<'_>| {
+                    whys.push(n.why);
+                    ControlFlow::Continue(())
+                };
+                let mut counted = 0;
+                let mut count = |_: CheckoutPerfdataRef<'_>| counted += 1;
+                let mut notify = NotifyCallback::new(&mut record);
+                let mut perfdata = PerfdataCallback::new(&mut count);
+                let rc = checkout(&staged, &target, strategy, &mut notify, &mut perfdata);
+                drop((notify, perfdata));
+                assert_eq!((rc, counted), (expected, 0), "{strategy:#x}");
+                if strategy == 0 {
+                    assert_eq!(whys, [CONFLICT, CONFLICT, UPDATED, UNTRACKED]);
+                } else {
+                    assert_eq!(whys, [UPDATED, UPDATED, UPDATED, UNTRACKED]);
+                }
+            }
+            assert_eq!(fs::read(path.join("a.txt")).unwrap(), b"changed\n");
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls C")]
+        fn a_notify_panic_cancels_the_checkout_then_resumes() {
+            let staged = Staged::new("notify-panic", FILES);
+            let (path, target) = staged.target("out");
+            let mut calls = 0;
+            let mut boom = |n: CheckoutNotification<'_>| {
+                calls += 1;
+                assert!(n.path != Some(c"dir/b.txt"), "boom");
+                ControlFlow::Continue(())
+            };
+            let mut count = |_: CheckoutPerfdataRef<'_>| unreachable!("the checkout is cancelled");
+            let mut notify = NotifyCallback::new(&mut boom);
+            let mut perfdata = PerfdataCallback::new(&mut count);
+            let caught = panic::catch_unwind(AssertUnwindSafe(|| {
+                checkout(&staged, &target, FORCE, &mut notify, &mut perfdata)
+            }));
+            assert_eq!(*caught.unwrap_err().downcast::<&str>().unwrap(), "boom");
+            assert!(format!("{notify:?}").contains("panicked: false"));
+            drop((notify, perfdata));
+            // The planning stops at the cancelled path: nothing is written.
+            assert_eq!(calls, 2);
+            assert!(!path.join("a.txt").exists());
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls C")]
+        fn a_perfdata_panic_lets_the_checkout_finish_then_resumes() {
+            let staged = Staged::new("perfdata-panic", FILES);
+            let (path, target) = staged.target("out");
+            let mut go_on = |_: CheckoutNotification<'_>| ControlFlow::Continue(());
+            let mut boom = |_: CheckoutPerfdataRef<'_>| panic!("boom");
+            let mut notify = NotifyCallback::new(&mut go_on);
+            let mut perfdata = PerfdataCallback::new(&mut boom);
+            let caught = panic::catch_unwind(AssertUnwindSafe(|| {
+                checkout(&staged, &target, FORCE, &mut notify, &mut perfdata)
+            }));
+            assert_eq!(*caught.unwrap_err().downcast::<&str>().unwrap(), "boom");
+            assert!(format!("{perfdata:?}").contains("panicked: false"));
+            drop((notify, perfdata));
+            for (file, content) in FILES {
+                assert_eq!(fs::read(path.join(file)).unwrap(), content.as_bytes());
+            }
+        }
+
+        /// A `git_diff_file` over `path`, as libgit2 lends one.
+        fn raw_file(path: &CStr, size: u64) -> ffi::git_diff_file {
+            ffi::git_diff_file {
+                path: path.as_ptr(),
+                size,
+                mode: 0o100_644,
+                ..Default::default()
+            }
+        }
+
+        #[test]
+        fn call_lends_the_reason_path_and_sides() {
+            let mut notes = Vec::new();
+            let mut record = |n: CheckoutNotification<'_>| {
+                notes.push(note(n));
+                ControlFlow::Continue(())
+            };
+            let mut callback = NotifyCallback::new(&mut record);
+            let owned = CString::new("dir/é.txt").unwrap();
+            let mut old = raw_file(&owned, 3);
+            let mut new = raw_file(c"renamed", u64::MAX);
+            // SAFETY: a live diff file whose path outlives the handle, which only reads it.
+            let b = unsafe { DiffFileRef::from_ptr(&raw mut old) };
+            // SAFETY: as above.
+            let t = unsafe { DiffFileRef::from_ptr(&raw mut new) };
+            let full = CheckoutNotification {
+                why: CONFLICT,
+                path: Some(&owned),
+                baseline: b,
+                target: t,
+                workdir: b,
+            };
+            assert_eq!(
+                format!("{full:?}"),
+                "CheckoutNotification { why: 0x1, path: Some(\"dir/é.txt\"), \
+                 baseline: Some(\"dir/é.txt\"), target: Some(\"renamed\"), \
+                 workdir: Some(\"dir/é.txt\") }"
+            );
+            assert_eq!(callback.call(full), ControlFlow::Continue(()));
+            assert_eq!(callback.call(bare(0, None)), ControlFlow::Continue(()));
+            assert_eq!(
+                format!("{callback:?}"),
+                "NotifyCallback { panicked: false, .. }"
+            );
+            drop(callback);
+            let file = |p: &CStr, size| Some((Some(p.to_owned()), 0o100_644, size));
+            assert_eq!(
+                notes,
+                [
+                    (
+                        CONFLICT,
+                        Some(owned.clone()),
+                        file(&owned, 3),
+                        file(c"renamed", u64::MAX),
+                        file(&owned, 3)
+                    ),
+                    (0, None, None, None, None),
+                ]
+            );
+        }
+
+        #[test]
+        fn the_notify_trampoline_reads_nulls_as_none_and_breaks_as_euser() {
+            let mut seen = Vec::new();
+            let mut record = |n: CheckoutNotification<'_>| {
+                let none = (
+                    n.baseline.is_none(),
+                    n.target.is_none(),
+                    n.workdir.is_none(),
+                );
+                seen.push((n.why, n.path.is_none(), none));
+                if n.why == 0 {
+                    ControlFlow::Continue(())
+                } else {
+                    ControlFlow::Break(())
+                }
+            };
+            let mut callback = NotifyCallback::new(&mut record);
+            let mut file = raw_file(c"x", 1);
+            let file_ptr = (&raw mut file).cast_const();
+            let rcs = callback.walk_with(|cb, payload| {
+                let cb = cb.unwrap();
+                // SAFETY: `payload` is the callback `walk_with` lends; NULLs are in the
+                // trampoline's contract.
+                let first = unsafe {
+                    cb(
+                        0,
+                        ptr::null(),
+                        ptr::null(),
+                        ptr::null(),
+                        ptr::null(),
+                        payload,
+                    )
+                };
+                // SAFETY: as above, with a path and a file live for the call.
+                let second = unsafe {
+                    cb(
+                        UPDATED,
+                        c"x".as_ptr(),
+                        ptr::null(),
+                        file_ptr,
+                        ptr::null(),
+                        payload,
+                    )
+                };
+                (first, second)
+            });
+            drop(callback);
+            assert_eq!(rcs, (0, USER));
+            assert_eq!(
+                seen,
+                [
+                    (0, true, (true, true, true)),
+                    (UPDATED, false, (true, false, true))
+                ]
+            );
+        }
+
+        #[test]
+        fn a_notify_panic_cancels_every_later_call_of_the_walk_then_resumes() {
+            let mut calls = 0;
+            let mut boom = |_: CheckoutNotification<'_>| -> ControlFlow<()> {
+                calls += 1;
+                panic!("boom");
+            };
+            let mut callback = NotifyCallback::new(&mut boom);
+            let mut rcs = Vec::new();
+            let caught = panic::catch_unwind(AssertUnwindSafe(|| {
+                callback.walk_with(|cb, payload| {
+                    let cb = cb.unwrap();
+                    for _ in 0..3 {
+                        // SAFETY: `payload` is the callback `walk_with` lends.
+                        rcs.push(unsafe {
+                            cb(
+                                UPDATED,
+                                ptr::null(),
+                                ptr::null(),
+                                ptr::null(),
+                                ptr::null(),
+                                payload,
+                            )
+                        });
+                    }
+                });
+            }));
+            assert_eq!(*caught.unwrap_err().downcast::<&str>().unwrap(), "boom");
+            assert_eq!(rcs, [USER; 3]);
+            assert!(format!("{callback:?}").contains("panicked: false"));
+            drop(callback);
+            assert_eq!(calls, 1);
+        }
+
+        #[test]
+        fn notify_call_resumes_a_panic_and_the_callback_runs_again() {
+            let mut calls = 0;
+            let mut f = |n: CheckoutNotification<'_>| {
+                calls += 1;
+                assert_ne!(n.why, CONFLICT, "conflict");
+                ControlFlow::Continue(())
+            };
+            let mut callback = NotifyCallback::new(&mut f);
+            let caught =
+                panic::catch_unwind(AssertUnwindSafe(|| callback.call(bare(CONFLICT, None))));
+            assert!(caught.is_err());
+            assert_eq!(
+                callback.call(bare(UPDATED, None)),
+                ControlFlow::Continue(())
+            );
+            drop(callback);
+            assert_eq!(calls, 2);
+        }
+
+        #[test]
+        fn a_notify_walk_that_unwinds_leaves_no_stale_panic() {
+            let mut calls = 0;
+            let mut f = |_: CheckoutNotification<'_>| {
+                calls += 1;
+                assert!(calls > 1, "first call");
+                ControlFlow::Continue(())
+            };
+            let mut callback = NotifyCallback::new(&mut f);
+            let walked = panic::catch_unwind(AssertUnwindSafe(|| {
+                callback.walk_with(|cb, payload| {
+                    // SAFETY: `payload` is the callback `walk_with` lends.
+                    unsafe {
+                        cb.unwrap()(
+                            UPDATED,
+                            ptr::null(),
+                            ptr::null(),
+                            ptr::null(),
+                            ptr::null(),
+                            payload,
+                        )
+                    };
+                    panic!("the walk's own");
+                })
+            }));
+            assert_eq!(
+                *walked.unwrap_err().downcast::<&str>().unwrap(),
+                "the walk's own"
+            );
+            assert_eq!(
+                callback.call(bare(UPDATED, None)),
+                ControlFlow::Continue(())
+            );
+            drop(callback);
+            assert_eq!(calls, 2);
+        }
+
+        #[test]
+        fn perfdata_call_lends_the_counts() {
+            let mut seen = Vec::new();
+            let mut record = |d: CheckoutPerfdataRef<'_>| seen.push(d.copied());
+            let mut callback = PerfdataCallback::new(&mut record);
+            let mut counts = CheckoutPerfdata::default();
+            callback.call(counts.as_ref());
+            counts.as_mut().set_mkdir_calls(usize::MAX);
+            counts.as_mut().set_chmod_calls(3);
+            callback.call(counts.as_ref());
+            assert_eq!(
+                format!("{callback:?}"),
+                "PerfdataCallback { panicked: false, .. }"
+            );
+            drop(callback);
+            assert_eq!(seen, [CheckoutPerfdata::default(), counts]);
+        }
+
+        #[test]
+        fn the_perfdata_trampoline_skips_a_null_and_reads_c_counts() {
+            let mut seen = Vec::new();
+            let mut record = |d: CheckoutPerfdataRef<'_>| seen.push(d.copied());
+            let mut callback = PerfdataCallback::new(&mut record);
+            let raw = ffi::git_checkout_perfdata {
+                mkdir_calls: 1,
+                stat_calls: 2,
+                chmod_calls: 3,
+            };
+            callback.walk_with(|cb, payload| {
+                let cb = cb.unwrap();
+                // SAFETY: `payload` is the callback `walk_with` lends; NULL is in the
+                // trampoline's contract.
+                unsafe { cb(ptr::null(), payload) };
+                // SAFETY: as above, with counters live for the call.
+                unsafe { cb(&raw const raw, payload) };
+            });
+            drop(callback);
+            assert_eq!(seen, [counts(1, 2, 3)]);
+        }
+
+        #[test]
+        fn a_perfdata_panic_skips_later_calls_of_the_walk_then_resumes() {
+            let mut calls = 0;
+            let mut boom = |_: CheckoutPerfdataRef<'_>| {
+                calls += 1;
+                panic!("boom");
+            };
+            let mut callback = PerfdataCallback::new(&mut boom);
+            let counts = CheckoutPerfdata::default();
+            let caught = panic::catch_unwind(AssertUnwindSafe(|| {
+                callback.walk_with(|cb, payload| {
+                    for _ in 0..2 {
+                        // SAFETY: `payload` is the callback `walk_with` lends.
+                        unsafe { cb.unwrap()(counts.as_ref().as_ptr(), payload) };
+                    }
+                });
+            }));
+            assert_eq!(*caught.unwrap_err().downcast::<&str>().unwrap(), "boom");
+            // The same callback runs again: the walk's panic was resumed, not kept.
+            let caught = panic::catch_unwind(AssertUnwindSafe(|| callback.call(counts.as_ref())));
+            assert!(caught.is_err());
+            drop(callback);
+            assert_eq!(calls, 2);
+        }
+
+        #[test]
+        fn a_perfdata_walk_that_unwinds_leaves_no_stale_panic() {
+            let mut calls = 0;
+            let mut f = |_: CheckoutPerfdataRef<'_>| {
+                calls += 1;
+                assert!(calls > 1, "first call");
+            };
+            let mut callback = PerfdataCallback::new(&mut f);
+            let counts = CheckoutPerfdata::default();
+            let walked = panic::catch_unwind(AssertUnwindSafe(|| {
+                callback.walk_with(|cb, payload| {
+                    // SAFETY: `payload` is the callback `walk_with` lends.
+                    unsafe { cb.unwrap()(counts.as_ref().as_ptr(), payload) };
+                    panic!("the walk's own");
+                })
+            }));
+            assert_eq!(
+                *walked.unwrap_err().downcast::<&str>().unwrap(),
+                "the walk's own"
+            );
+            callback.call(counts.as_ref());
+            drop(callback);
+            assert_eq!(calls, 2);
+        }
+    }
+
     /// The progress callback's tests.
     mod progress_callback {
         use std::path::PathBuf;
@@ -1765,21 +2702,21 @@ mod unit_tests {
 
         /// `GIT_CHECKOUT_FORCE`, from `git2/checkout.h`: the `-sys` crate does not bind the
         /// strategy enum.
-        const FORCE: u32 = 1 << 1;
+        pub(super) const FORCE: u32 = 1 << 1;
 
         /// What a closure saw: the path (owned) and the two counts of each call.
         type Seen = Vec<(Option<CString>, usize, usize)>;
 
         /// A repository under a scratch directory, its working directory holding `files`,
         /// all staged in its index; released on drop.
-        struct Staged {
-            dir: PathBuf,
-            repo: *mut ffi::git_repository,
-            index: *mut ffi::git_index,
+        pub(super) struct Staged {
+            pub(super) dir: PathBuf,
+            pub(super) repo: *mut ffi::git_repository,
+            pub(super) index: *mut ffi::git_index,
         }
 
         impl Staged {
-            fn new(tag: &str, files: &[(&str, &str)]) -> Self {
+            pub(super) fn new(tag: &str, files: &[(&str, &str)]) -> Self {
                 // libgit2 marks a filter initialised on its first load outside the registry
                 // lock (`filter_initialize`), so concurrent first loads race (TSan): the
                 // first fixture, whose staging loads the filters, is built alone.
@@ -1837,7 +2774,7 @@ mod unit_tests {
                 })
             }
 
-            fn target(&self, name: &str) -> (PathBuf, CString) {
+            pub(super) fn target(&self, name: &str) -> (PathBuf, CString) {
                 let path = self.dir.join(name);
                 let c = CString::new(path.to_str().unwrap()).unwrap();
                 (path, c)
@@ -1854,7 +2791,7 @@ mod unit_tests {
             }
         }
 
-        const FILES: &[(&str, &str)] = &[
+        pub(super) const FILES: &[(&str, &str)] = &[
             ("a.txt", "one\n"),
             ("dir/b.txt", "two\n"),
             ("dir/sub/c.txt", "three\n"),

@@ -1,0 +1,35 @@
+error[E0521]: borrowed data escapes outside of function
+  --> tests/ub_safe/compile_fail/checkout_notification_outlives_call.rs:13:24
+   |
+ 8 | fn keep<'k>(kept: &mut Option<CheckoutNotification<'k>>) {
+   |         --  ---- `kept` is a reference that is only valid in the function body
+   |         |
+   |         lifetime `'k` defined here
+...
+13 |     let mut callback = NotifyCallback::new(&mut f);
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |                        |
+   |                        `kept` escapes the function body here
+   |                        argument requires that `'k` must outlive `'static`
+   |
+   = note: requirement occurs because of a mutable reference to `{closure@$DIR/tests/ub_safe/compile_fail/checkout_notification_outlives_call.rs:9:17: 9:46}`
+   = note: mutable references are invariant over their type parameter
+   = help: see <https://doc.rust-lang.org/nomicon/subtyping.html> for more information about variance
+
+error: implementation of `FnMut` is not general enough
+  --> tests/ub_safe/compile_fail/checkout_notification_outlives_call.rs:13:24
+   |
+13 |     let mut callback = NotifyCallback::new(&mut f);
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^ implementation of `FnMut` is not general enough
+   |
+   = note: closure with signature `fn(CheckoutNotification<'2>) -> ControlFlow<()>` must implement `FnMut<(CheckoutNotification<'1>,)>`, for any lifetime `'1`...
+   = note: ...but it actually implements `FnMut<(CheckoutNotification<'2>,)>`, for some specific lifetime `'2`
+
+error: implementation of `FnOnce` is not general enough
+  --> tests/ub_safe/compile_fail/checkout_notification_outlives_call.rs:13:24
+   |
+13 |     let mut callback = NotifyCallback::new(&mut f);
+   |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^ implementation of `FnOnce` is not general enough
+   |
+   = note: closure with signature `fn(CheckoutNotification<'2>) -> ControlFlow<()>` must implement `FnOnce<(CheckoutNotification<'1>,)>`, for any lifetime `'1`...
+   = note: ...but it actually implements `FnOnce<(CheckoutNotification<'2>,)>`, for some specific lifetime `'2`
