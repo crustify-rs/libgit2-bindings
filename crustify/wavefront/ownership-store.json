@@ -459,7 +459,7 @@
   {
    "name": "git_checkout_perfdata",
    "defined_in": "include/git2/checkout.h",
-   "_comment_user": "Plain 24-byte value of three size_t counters, no pointers and no lifecycle routines (--lifecycle-ops is empty). Its only producer, git_checkout_iterator, holds it inside its zero-initialised checkout_data and accumulates into it (stat_calls in mkpath2file, blob_content_to_file, blob_content_to_link, checkout_submodule_update_index and checkout_safe_for_update_only; all three from each git_futils_mkdir_relative call's own perfdata via checkout_mkdir). It is lent to opts.perfdata_cb as const git_checkout_perfdata * once, after a successful checkout, valid for the call only and unwritten during it. Checkout never passes GIT_MKDIR_CHMOD*, so chmod_calls is always 0 from libgit2.",
+   "_comment_user": "Plain 24-byte value of three size_t counters, no pointers and no lifecycle routines (--lifecycle-ops is empty). Its only producer, git_checkout_iterator, holds it inside its zero-initialised checkout_data and accumulates into it (stat_calls in mkpath2file, blob_content_to_file, blob_content_to_link, checkout_submodule_update_index and checkout_safe_for_update_only; all three from each git_futils_mkdir_relative call's own perfdata via checkout_mkdir). It is lent to opts.perfdata_cb as const git_checkout_perfdata * once, after checkout has written the working directory but before git_index_write (checkout.c:2680-2686), so a checkout whose index write then fails (GIT_ELOCKED) has still reported; valid for the call only and unwritten during it. Checkout never passes GIT_MKDIR_CHMOD*, so chmod_calls is always 0 from libgit2.",
    "fields": [
     {
      "name": "chmod_calls",

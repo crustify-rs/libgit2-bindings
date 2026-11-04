@@ -41,9 +41,11 @@
 //!
 //! # Performance data
 //!
-//! A checkout that succeeds reports the filesystem calls it made to its performance-data
-//! callback as a `git_checkout_perfdata`: three counters, zeroed when the checkout starts,
-//! held in its own state and lent to the callback for the call. Rust reads them through a
+//! A checkout that has written the working directory reports the filesystem calls it made to
+//! its performance-data callback as a `git_checkout_perfdata`: three counters, zeroed when the
+//! checkout starts, held in its own state and lent to the callback for the call. It reports
+//! before it writes the index, so a checkout whose index write then fails has still reported:
+//! a report does not mean the checkout succeeded. Rust reads them through a
 //! [`CheckoutPerfdataRef`], and holds a copy, or a value of its own, as a
 //! [`CheckoutPerfdata`].
 //!
@@ -774,7 +776,8 @@ impl<'o> CheckoutOptionsMut<'_, 'o> {
     }
 
     /// Sets the performance-data callback and the payload it is passed; `None` calls
-    /// nothing. libgit2 calls it once a checkout succeeds, with counts of the
+    /// nothing. libgit2 calls it once a checkout has written the working directory, before
+    /// it writes the index, which can still fail the checkout, with counts of the
     /// `mkdir`, `stat` and `chmod` calls it made, which the callback reads by borrowing a
     /// [`CheckoutPerfdataRef`] over its `perfdata` argument for the call.
     ///

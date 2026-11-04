@@ -25,7 +25,7 @@
 //! [`ControlFlow::Break`] becomes.
 
 use std::cell::RefCell;
-use std::ffi::{CStr, CString, c_char, c_int, c_void};
+use std::ffi::{CStr, CString, OsStr, c_char, c_int, c_void};
 use std::ops::ControlFlow;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
@@ -1737,4 +1737,99 @@ fn a_notify_callback_sees_conflicts_as_a_c_callback() {
         assert_eq!(outcome.rc, 0);
         assert_eq!(outcome.log.perfdata.len(), 1, "{outcome:?}");
     }
+}
+
+const GIT_CHECKOUT_UPDATE_ONLY: u32 = 1 << 7;
+
+/// The counting paths the first sequence leaves out, read through C and through the
+/// handle after every checkout: a symbolic link written (`blob_content_to_link`), files
+/// updated under `GIT_CHECKOUT_UPDATE_ONLY` (`checkout_safe_for_update_only`), and a
+/// checkout that reports its counts and then fails to write the index, which libgit2
+/// does after calling the callback: a report does not mean the checkout succeeded.
+#[test]
+#[cfg_attr(miri, ignore = "calls C")]
+fn perfdata_reads_match_c_on_links_update_only_and_a_failed_index_write() {
+    let f = Fixture::new("perfdata-paths");
+    // A tree holding `TREE1` and a symbolic link to `a.txt`.
+    std::os::unix::fs::symlink("a.txt", f.work.join("link")).unwrap();
+    let link = CString::new("link").unwrap();
+    // SAFETY: the index is live and `link` NUL-terminated, read for the call.
+    let rc = unsafe { ffi::git_index_add_bypath(f.index, link.as_ptr()) };
+    assert_eq!(rc, 0, "{:?}", c_last(&f.root));
+    let mut id = ffi::git_oid::default();
+    // SAFETY: `id` is a live out-parameter and the index is live.
+    let rc = unsafe { ffi::git_index_write_tree(&raw mut id, f.index) };
+    assert_eq!(rc, 0);
+    let mut link_tree = ptr::null_mut();
+    // SAFETY: `link_tree` is a live slot; the result is a new reference, freed below.
+    let rc = unsafe { ffi::git_tree_lookup(&raw mut link_tree, f.repo, &raw const id) };
+    assert_eq!(rc, 0);
+
+    let reads = RefCell::new(PerfdataReads::default());
+    let payload = ptr::from_ref(&reads).cast_mut().cast::<c_void>();
+    let mut options = CheckoutOptions::new();
+    // SAFETY: the callback reads its arguments as libgit2 passes them, and the payload is
+    // `reads`, which outlives every checkout these options run.
+    unsafe {
+        options
+            .as_mut()
+            .set_perfdata_callback(Some(perfdata_reads), payload);
+    };
+    let lock = f.work.join(".git/index.lock");
+    // (tree, strategy, target directory, index locked, expected return).
+    let steps = [
+        (link_tree, GIT_CHECKOUT_FORCE, 5, false, 0),
+        (
+            f.trees[1],
+            GIT_CHECKOUT_FORCE | GIT_CHECKOUT_UPDATE_ONLY,
+            5,
+            false,
+            0,
+        ),
+        (f.trees[0], GIT_CHECKOUT_FORCE, 6, true, ffi::GIT_ELOCKED),
+    ];
+    for (i, &(tree, strategy, target, locked, expected)) in steps.iter().enumerate() {
+        {
+            let mut m = options.as_mut();
+            m.set_strategy(strategy);
+            m.set_target_directory(Some(&f.targets[target]));
+        }
+        if locked {
+            fs::write(&lock, "").unwrap();
+        }
+        // SAFETY: the repository and tree are live, and the options are live, laid out
+        // as `git_checkout_options`, their pointers live or NULL.
+        let rc = unsafe { ffi::git_checkout_tree(f.repo, tree.cast(), c_ptr(&options)) };
+        if locked {
+            fs::remove_file(&lock).unwrap();
+        }
+        assert_eq!(rc, expected, "{:?}", c_last(&f.root));
+        let reads = reads.borrow();
+        assert_eq!(
+            reads.c.len(),
+            i + 1,
+            "one report per checkout, failed or not"
+        );
+        assert_eq!(reads.rust, reads.c);
+        let c = reads.c[i];
+        let copy = reads.copies[i].as_ref();
+        assert_eq!(
+            (copy.mkdir_calls(), copy.stat_calls(), copy.chmod_calls()),
+            c
+        );
+        if i == 0 {
+            let link = Path::new(OsStr::from_bytes(f.targets[5].as_bytes())).join("link");
+            let meta = fs::symlink_metadata(link).unwrap();
+            assert!(meta.file_type().is_symlink(), "the link was written as one");
+        }
+    }
+    let target = Path::new(OsStr::from_bytes(f.targets[5].as_bytes()));
+    assert_eq!(
+        fs::read_to_string(target.join("a.txt")).unwrap(),
+        "one changed\n"
+    );
+    let reads = reads.into_inner();
+    assert!(reads.c.iter().all(|c| c.1 > 0 && c.2 == 0), "{reads:?}");
+    // SAFETY: `link_tree` is the reference looked up above, used no more.
+    unsafe { ffi::git_tree_free(link_tree) };
 }
