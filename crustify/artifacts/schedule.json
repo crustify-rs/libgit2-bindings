@@ -21311,7 +21311,15 @@
           "kind": "review",
           "status": "todo",
           "reviews": [
-            0,
+            0
+          ],
+          "commits": []
+        },
+        {
+          "index": 1,
+          "kind": "review",
+          "status": "todo",
+          "reviews": [
             1
           ],
           "commits": []
@@ -21323,7 +21331,7 @@
       "link_unit": "libgit2",
       "module": "src/libgit2/checkout.c",
       "foundational": false,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
           217,
@@ -21341,7 +21349,7 @@
         {
           "index": 0,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_checkout_notify_cb",
@@ -21358,7 +21366,9 @@
               "home": "src/libgit2/src/libgit2/checkout.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "b694c36538868d68e79be67d20297edfcf52b893"
+          ]
         }
       ]
     },
