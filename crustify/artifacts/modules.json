@@ -36610,7 +36610,7 @@
         {
           "index": 143,
           "name": "src/libgit2/checkout.c",
-          "status": "todo",
+          "status": "frozen",
           "foundational": false,
           "depends_on": {
             "scheduled": [
