@@ -2,11 +2,14 @@
 # baseline.sh <crate checkout> <package> <cov dir> <nightly> [cargo test args...]: as run.sh, for a
 # comparison crate: its own C built by its build script, instrumented through CC/CFLAGS.
 set -uo pipefail
+trap 'echo "failed at line $LINENO" >&2' ERR
 src=$1 pkg=$2 out=$3 nightly=$4; shift 4
 host=x86_64-unknown-linux-gnu
 tree=$out/tree
 rm -rf "$out"; mkdir -p "$tree" "$out/prof"
 (cd "$src" && tar -cf - --exclude=./target --exclude=./.git .) | (cd "$tree" && tar -xf -)
+# a scratch copy inside another workspace's tree is its own workspace
+grep -q '^\[workspace\]' "$tree/Cargo.toml" || printf '\n[workspace]\n' >> "$tree/Cargo.toml"
 root=$(cd "$tree" && cargo metadata --no-deps --format-version 1 | python3 -c "import sys,json;d=json.load(sys.stdin);p=[x for x in d['packages'] if x['name']=='$pkg'][0];print([t['src_path'] for t in p['targets'] if 'lib' in t['kind']][0])")
 python3 "$(dirname "$0")/mark.py" "$(dirname "$root")" "$root"
 cd "$(dirname "$root")/.."

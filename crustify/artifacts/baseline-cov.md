@@ -93,8 +93,12 @@ baseline.sh /crustify-rs/git2-rs git2 "$PWD/crustify/tmp/baseline-git2" nightly-
     --locked --features https,ssh
 L=$PWD/crustify/tmp/baseline-git2/tree/libgit2-sys/libgit2
 NIGHTLY=nightly-2026-10-08 report.py crustify/tmp/baseline-git2 \
-    "C=$L/src/libgit2:$L/src/util:$L/include:$L/deps/xdiff:$L/deps/llhttp,Rust=$PWD/crustify/tmp/baseline-git2/tree/src" --c
+    "C=$L/src/libgit2:$L/src/util:$L/include:$L/deps/xdiff:$L/deps/llhttp,Rust=$PWD/crustify/tmp/baseline-git2/tree/src" \
+    --c <libgit2-sys OUT_DIR>/build/libgit2.a
 ```
+
+The static archive is an object too, so that a TU no test binary links would count at
+zero; `libgit2-sys` links every one, and it changes no figure.
 
 Every test passed but the one trybuild case, `tests/compile_fail.rs`, whose expected
 stderr is stable's and differs under the nightly. It passes on stable and runs no code, so

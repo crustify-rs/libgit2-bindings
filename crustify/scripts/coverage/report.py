@@ -3,7 +3,7 @@
 Merges each suite's profiles under <cov dir>/prof/, the four suites' union as TOTAL and every
 suite's as ALL, and prints the TOTAL line of `llvm-cov report` for each named scope, with the C
 objects and every test and doctest binary as objects for every suite. A scope's @<dir>
-resolves the relative paths a C build recorded. MERGED=1 reuses the merged profiles."""
+resolves the relative paths a C build recorded. MERGED=1 reuses the merged profiles, and ONLY=<suite> reports that one alone."""
 import subprocess,sys,pathlib,json,glob,os
 out0=pathlib.Path(sys.argv[1])
 nightly=os.environ.get("NIGHTLY") or next(l.split('"')[1] for l in open(out0/"tree"/"Cargo.toml") if l.startswith("nightly = "))
@@ -32,8 +32,9 @@ def total(prof,srcs):
 res={}
 skip=os.environ.get('MERGED')
 four=[x for x in suites if x!='doc']
-for s in suites+['TOTAL','ALL']:
+only=os.environ.get('ONLY')
+for s in ([only] if only else suites+['TOTAL','ALL']):
     prof=out/f'{s}.profdata' if skip else merge(s,four if s=='TOTAL' else suites if s=='ALL' else [s])
     res[s]={n:total(prof,src.split(':')) for n,src in scopes.items()}
     print(s,json.dumps(res[s]))
-(out/'figures.json').write_text(json.dumps(res,indent=1))
+(out/(f'figures-{only}.json' if only else 'figures.json')).write_text(json.dumps(res,indent=1))
