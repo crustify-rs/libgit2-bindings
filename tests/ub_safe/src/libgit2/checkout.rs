@@ -13,7 +13,9 @@
 //!
 //! The tests that run real checkouts over a borrowed baseline index and tree need the
 //! checkout routines (`git_checkout_head`, `_index`, `_tree`), which are not wrapped yet:
-//! they come with those wrappers.
+//! they come with those wrappers. The callbacks the options store are run by real
+//! checkouts already, through `Worktree::add`, which checks the new worktree out with the
+//! checkout options its own options embed: see [`stored_callbacks`].
 //!
 //! Every test builds its options through `git_checkout_options_init`, so Miri skips
 //! them; the inline unit tests run the accessors under Miri over a Rust-built value.
@@ -30,8 +32,8 @@ use std::thread;
 
 use ffibox::CZeroable;
 use libgit2::libgit2::src::libgit2::checkout::{
-    CheckoutOptions, CheckoutOptionsMut, CheckoutOptionsRef, CheckoutPerfdata, CheckoutPerfdataMut,
-    CheckoutPerfdataRef,
+    CallbackSlot, CheckoutOptions, CheckoutOptionsMut, CheckoutOptionsRef, CheckoutPerfdata,
+    CheckoutPerfdataMut, CheckoutPerfdataRef,
 };
 use libgit2::libgit2::src::libgit2::libgit2 as global;
 use libgit2::libgit2::src::libgit2::strarray::{StrArray, StrArrayView};
@@ -84,8 +86,13 @@ fn defaults_then_every_setter() {
     );
     assert!(!o.disable_filters() && o.notify_flags() == 0 && o.paths().is_empty());
     assert!(o.baseline().is_none() && o.baseline_index().is_none());
-    assert!(o.notify_callback().0.is_none() && o.progress_callback().0.is_none());
-    assert!(o.perfdata_callback().0.is_none());
+    let slots = (
+        o.notify_callback(),
+        o.progress_callback(),
+        o.perfdata_callback(),
+    );
+    let empty = CallbackSlot::Empty;
+    assert_eq!(slots, (empty, empty, empty));
     assert_eq!((o.target_directory(), o.our_label()), (None, None));
 
     for round in 0..64u32 {
@@ -893,5 +900,410 @@ mod perfdata_callback {
             }
         });
         assert_eq!(shared.into_inner().unwrap(), 4 * 50 * 2);
+    }
+}
+
+/// Callbacks stored in checkout options by their safe setters, which the options borrow
+/// exclusively for `'o`, run by libgit2 during the checkout `Worktree::add` makes with the
+/// checkout options its own options embed: the one wrapped routine that checks out yet.
+///
+/// libgit2 calls each through its trampoline with the callback as the payload, lending
+/// the closure paths, diff files and counters for the call alone: each is read in full
+/// (`ASan`), and nothing outlives the call. A cancel fails the add, which releases what it
+/// built (`LSan`). A panic of a closure never crosses C: it resumes from `Worktree::add`
+/// once libgit2 has returned, after the worktree it made is released (`ASan`, `LSan`), and
+/// the callback is reusable afterwards. A closure that reaches its own options through a
+/// `RefCell` and adds again with them finds its callback busy: the nested notification is
+/// cancelled rather than the closure entered twice, which would alias its exclusive borrow
+/// (`ASan`, and `BSan` for the borrow). Adds on several threads, each with its own
+/// repository, options and callbacks, share nothing (`TSan`).
+///
+/// The checkouts write files, so they load filters, whose first load libgit2 races
+/// against concurrent ones (`TSan`), and adds that create a branch take the time through
+/// `tzset`: each test runs alone in a child, and the threaded one primes the filters
+/// first and adds existing branches. Every test calls libgit2, all but one in a child, so
+/// none runs under Miri: each stops at the spawn or at the first C call.
+mod stored_callbacks {
+    use std::cell::RefCell;
+    use std::ffi::{CStr, CString};
+    use std::ops::ControlFlow;
+    use std::panic::{self, AssertUnwindSafe};
+    use std::thread;
+
+    use libgit2::ffi;
+    use libgit2::libgit2::src::libgit2::checkout::{
+        CallbackSlot, CheckoutNotification, CheckoutOptions, CheckoutPerfdataRef, NotifyCallback,
+        PerfdataCallback, ProgressCallback,
+    };
+    use libgit2::libgit2::src::libgit2::worktree::AddOptions;
+
+    use crate::fixture::isolated;
+    use crate::fixture::worktree_add::AddRepo;
+
+    /// `GIT_CHECKOUT_FORCE`, from `git2/checkout.h`, which the `-sys` crate does not bind.
+    const FORCE: u32 = 1 << 1;
+    const FILES: &[(&str, &str)] = &[("a.txt", "one\n"), ("b.txt", "two\n")];
+
+    /// One notification, as owned data: the reason, the path, and which sides it has.
+    type Note = (u32, Option<CString>, [bool; 3]);
+
+    fn note(n: CheckoutNotification<'_>) -> Note {
+        let path = n.path.map(CStr::to_owned);
+        // Every side is read in full.
+        for file in [n.baseline, n.target, n.workdir].into_iter().flatten() {
+            let _ = (file.path().map(CStr::to_bytes), file.mode(), file.size());
+        }
+        let sides = [
+            n.baseline.is_some(),
+            n.target.is_some(),
+            n.workdir.is_some(),
+        ];
+        (n.why, path, sides)
+    }
+
+    /// Forced checkout options, notifying on everything.
+    fn forced(opts: &mut AddOptions<'_>) {
+        let mut m = opts.as_mut();
+        let mut checkout = m.checkout_options();
+        checkout.set_strategy(FORCE);
+        checkout.set_notify_flags(ffi::GIT_CHECKOUT_NOTIFY_ALL);
+    }
+
+    fn callbacks_run_during_the_add() {
+        let repo = AddRepo::with_files("callbacks-run", FILES);
+        let (mut notes, mut reports, mut counts) = (Vec::new(), Vec::new(), Vec::new());
+        let mut on_note = |n: CheckoutNotification<'_>| {
+            notes.push(note(n));
+            ControlFlow::Continue(())
+        };
+        let mut on_progress = |path: Option<&CStr>, done, total| {
+            reports.push((path.map(CStr::to_owned), done, total));
+        };
+        let mut on_perfdata = |d: CheckoutPerfdataRef<'_>| counts.push(d.copied());
+        let mut notify = NotifyCallback::new(&mut on_note);
+        let mut progress = ProgressCallback::new(&mut on_progress);
+        let mut perfdata = PerfdataCallback::new(&mut on_perfdata);
+        {
+            let mut opts = AddOptions::new();
+            forced(&mut opts);
+            let mut m = opts.as_mut();
+            let mut checkout = m.checkout_options();
+            checkout.set_notify_callback(Some(&mut notify));
+            checkout.set_progress_callback(Some(&mut progress));
+            checkout.set_perfdata_callback(Some(&mut perfdata));
+            let o = opts.as_ref().checkout_options();
+            let rust = CallbackSlot::Rust;
+            let slots = (
+                o.notify_callback(),
+                o.progress_callback(),
+                o.perfdata_callback(),
+            );
+            assert_eq!(slots, (rust, rust, rust));
+            let worktree = repo.add("wt", Some(&opts)).unwrap();
+            drop(worktree);
+        }
+        // The options are gone, so the callbacks are free again.
+        progress.call(None, 9, 9);
+        drop((notify, progress, perfdata));
+        let target = [false, true, false];
+        let updated = |path: &CStr| {
+            (
+                ffi::GIT_CHECKOUT_NOTIFY_UPDATED,
+                Some(path.to_owned()),
+                target,
+            )
+        };
+        assert_eq!(notes, [updated(c"a.txt"), updated(c"b.txt")]);
+        let step = |path: &CStr, done| (Some(path.to_owned()), done, 2);
+        let expected = [
+            (None, 0, 2),
+            step(c"a.txt", 1),
+            step(c"b.txt", 2),
+            (None, 9, 9),
+        ];
+        assert_eq!(reports, expected);
+        assert_eq!(counts.len(), 1);
+        assert!(counts[0].as_ref().stat_calls() > 0);
+        let written = std::fs::read_to_string(repo.base.join("wt/wt/b.txt")).unwrap();
+        assert_eq!(written, "two\n");
+    }
+
+    fn a_break_cancels_the_add() {
+        let repo = AddRepo::with_files("callbacks-break", FILES);
+        let mut seen = Vec::new();
+        let mut on_note = |n: CheckoutNotification<'_>| {
+            seen.push(note(n));
+            if n.path == Some(c"b.txt") {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        };
+        let mut progress_calls = 0;
+        let mut on_progress = |_: Option<&CStr>, _, _| progress_calls += 1;
+        let mut notify = NotifyCallback::new(&mut on_note);
+        let mut progress = ProgressCallback::new(&mut on_progress);
+        {
+            let mut opts = AddOptions::new();
+            forced(&mut opts);
+            let mut m = opts.as_mut();
+            let mut checkout = m.checkout_options();
+            checkout.set_notify_callback(Some(&mut notify));
+            checkout.set_progress_callback(Some(&mut progress));
+            let (code, _) = repo.add("wt", Some(&opts)).unwrap_err();
+            assert_eq!(code, ffi::GIT_EUSER);
+            // The cancel stopped the checkout before it wrote anything.
+            assert!(!repo.base.join("wt/wt/a.txt").exists());
+        }
+        // Free again, the notification callback still breaks on `b.txt`.
+        let bare = |path| CheckoutNotification {
+            why: ffi::GIT_CHECKOUT_NOTIFY_UPDATED,
+            path: Some(path),
+            baseline: None,
+            target: None,
+            workdir: None,
+        };
+        assert_eq!(notify.call(bare(c"b.txt")), ControlFlow::Break(()));
+        assert_eq!(notify.call(bare(c"c.txt")), ControlFlow::Continue(()));
+        drop((notify, progress));
+        assert_eq!(seen.len(), 4);
+        assert_eq!(progress_calls, 0);
+    }
+
+    fn panics_resume_from_the_add() {
+        let repo = AddRepo::with_files("callbacks-panic", FILES);
+        // A progress panic: the checkout goes on without the closure, the performance
+        // callback still reports, and the panic resumes once the add has returned.
+        let mut reports = Vec::new();
+        let mut on_progress = |path: Option<&CStr>, done, _| {
+            reports.push(done);
+            assert!(path != Some(c"a.txt"), "progress panics");
+        };
+        let mut counts = 0;
+        let mut on_perfdata = |_: CheckoutPerfdataRef<'_>| counts += 1;
+        let mut progress = ProgressCallback::new(&mut on_progress);
+        let mut perfdata = PerfdataCallback::new(&mut on_perfdata);
+        {
+            let mut opts = AddOptions::new();
+            forced(&mut opts);
+            let mut m = opts.as_mut();
+            let mut checkout = m.checkout_options();
+            checkout.set_progress_callback(Some(&mut progress));
+            checkout.set_perfdata_callback(Some(&mut perfdata));
+            let add = panic::catch_unwind(AssertUnwindSafe(|| repo.add("progress", Some(&opts))));
+            let panic = add.expect_err("the progress panic resumes from the add");
+            assert_eq!(panic.downcast_ref::<&str>(), Some(&"progress panics"));
+            // The worktree was made and checked out; the box the add looked up is gone.
+            let written = std::fs::read_to_string(repo.base.join("wt/progress/b.txt"));
+            assert_eq!(written.unwrap(), "two\n");
+            // A second add with the same options starts afresh.
+            let add = panic::catch_unwind(AssertUnwindSafe(|| repo.add("again", Some(&opts))));
+            assert!(add.is_err());
+        }
+        progress.call(Some(c"z.txt"), 7, 7);
+        drop((progress, perfdata));
+        assert_eq!(reports, [0, 1, 0, 1, 7]);
+        assert_eq!(counts, 2);
+
+        // A notification panic cancels the checkout, which never reports progress.
+        let mut on_note =
+            |_: CheckoutNotification<'_>| -> ControlFlow<()> { panic!("notify panics") };
+        let mut reported = 0;
+        let mut on_progress = |_: Option<&CStr>, _, _| reported += 1;
+        let mut notify = NotifyCallback::new(&mut on_note);
+        let mut progress = ProgressCallback::new(&mut on_progress);
+        let mut opts = AddOptions::new();
+        forced(&mut opts);
+        let mut m = opts.as_mut();
+        let mut checkout = m.checkout_options();
+        checkout.set_notify_callback(Some(&mut notify));
+        checkout.set_progress_callback(Some(&mut progress));
+        let add = panic::catch_unwind(AssertUnwindSafe(|| repo.add("notify", Some(&opts))));
+        let panic = add.expect_err("the notification panic resumes from the add");
+        assert_eq!(panic.downcast_ref::<&str>(), Some(&"notify panics"));
+        assert!(!repo.base.join("wt/notify/a.txt").exists());
+        drop((notify, progress));
+        assert_eq!(reported, 0);
+    }
+
+    fn a_nested_add_finds_the_callback_busy() {
+        let repo = AddRepo::with_files("callbacks-nested", FILES);
+        let opts = RefCell::new(AddOptions::new());
+        forced(&mut opts.borrow_mut());
+        let nested = RefCell::new(Vec::new());
+        let calls = RefCell::new(Vec::new());
+        let mut on_note = |n: CheckoutNotification<'_>| {
+            calls.borrow_mut().push(n.path.map(CStr::to_owned));
+            if nested.borrow().is_empty() {
+                // The closure reaches its own options, and adds again with them.
+                let result = repo.add("inner", Some(&*opts.borrow()));
+                nested
+                    .borrow_mut()
+                    .push(result.map(drop).map_err(|(code, _)| code));
+            }
+            ControlFlow::Continue(())
+        };
+        let mut notify = NotifyCallback::new(&mut on_note);
+        opts.borrow_mut()
+            .as_mut()
+            .checkout_options()
+            .set_notify_callback(Some(&mut notify));
+        let outer = repo.add("outer", Some(&*opts.borrow()));
+        drop(outer.unwrap());
+        // The nested add's checkout found the callback busy, so it was cancelled without
+        // entering the closure again; the outer checkout went on.
+        assert_eq!(nested.borrow().clone(), [Err(ffi::GIT_EUSER)]);
+        let calls = calls.borrow().clone();
+        assert_eq!(
+            calls,
+            [Some(c"a.txt".to_owned()), Some(c"b.txt".to_owned())]
+        );
+        assert!(repo.base.join("wt/outer/b.txt").is_file());
+        assert!(!repo.base.join("wt/inner/a.txt").exists());
+    }
+
+    /// Adds the existing branch `name`, which takes no time, with callbacks counting what
+    /// they see; returns the notifications, progress reports and performance reports.
+    fn counted_add(repo: &AddRepo, name: &str) -> (usize, usize, usize) {
+        let (mut notes, mut reports, mut counts) = (0, 0, 0);
+        let mut on_note = |_: CheckoutNotification<'_>| {
+            notes += 1;
+            ControlFlow::Continue(())
+        };
+        let mut on_progress = |_: Option<&CStr>, _, _| reports += 1;
+        let mut on_perfdata = |_: CheckoutPerfdataRef<'_>| counts += 1;
+        let mut notify = NotifyCallback::new(&mut on_note);
+        let mut progress = ProgressCallback::new(&mut on_progress);
+        let mut perfdata = PerfdataCallback::new(&mut on_perfdata);
+        {
+            let mut opts = AddOptions::new();
+            forced(&mut opts);
+            let mut m = opts.as_mut();
+            m.set_checkout_existing(true);
+            let mut checkout = m.checkout_options();
+            checkout.set_notify_callback(Some(&mut notify));
+            checkout.set_progress_callback(Some(&mut progress));
+            checkout.set_perfdata_callback(Some(&mut perfdata));
+            drop(repo.add(name, Some(&opts)).unwrap());
+        }
+        drop((notify, progress, perfdata));
+        (notes, reports, counts)
+    }
+
+    fn adds_on_threads_share_nothing() {
+        // The first filter load, alone.
+        let primer = AddRepo::with_files("callbacks-threads-prime", FILES);
+        assert_eq!(counted_add(&primer, "feature"), (2, 3, 1));
+        thread::scope(|s| {
+            for i in 0..4 {
+                s.spawn(move || {
+                    let repo = AddRepo::with_files(&format!("callbacks-threads-{i}"), FILES);
+                    for name in ["feature", "alpha"] {
+                        assert_eq!(counted_add(&repo, name), (2, 3, 1));
+                    }
+                });
+            }
+        });
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "spawns a process")]
+    fn a_notification_break_cancels_the_add_and_the_callback_is_reused() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::a_notification_break_cancels_the_add_and_the_callback_is_reused"
+            ),
+            a_break_cancels_the_add,
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "spawns a process")]
+    fn closure_panics_resume_from_the_add() {
+        isolated(
+            concat!(module_path!(), "::closure_panics_resume_from_the_add"),
+            panics_resume_from_the_add,
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "spawns a process")]
+    fn an_add_the_closure_makes_with_its_own_options_finds_it_busy() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::an_add_the_closure_makes_with_its_own_options_finds_it_busy"
+            ),
+            a_nested_add_finds_the_callback_busy,
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "spawns a process")]
+    fn adds_on_threads_with_their_own_callbacks_share_nothing() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::adds_on_threads_with_their_own_callbacks_share_nothing"
+            ),
+            adds_on_threads_share_nothing,
+        );
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "calls libgit2")]
+    fn slots_report_what_the_safe_setters_store() {
+        let (mut on_note, mut on_progress, mut on_perfdata) = (
+            |_: CheckoutNotification<'_>| ControlFlow::Continue(()),
+            |_: Option<&CStr>, _, _| {},
+            |_: CheckoutPerfdataRef<'_>| {},
+        );
+        let mut notify = NotifyCallback::new(&mut on_note);
+        let mut progress = ProgressCallback::new(&mut on_progress);
+        let mut perfdata = PerfdataCallback::new(&mut on_perfdata);
+        let mut options = CheckoutOptions::new();
+        let mut m = options.as_mut();
+        m.set_notify_callback(Some(&mut notify));
+        m.set_perfdata_callback(Some(&mut perfdata));
+        let o = m.as_ref();
+        let (rust, empty) = (CallbackSlot::Rust, CallbackSlot::Empty);
+        let slots = (
+            o.notify_callback(),
+            o.progress_callback(),
+            o.perfdata_callback(),
+        );
+        assert_eq!(slots, (rust, empty, rust));
+        // Through the handles of options embedded in another struct alike.
+        let mut add = AddOptions::new();
+        add.as_mut()
+            .checkout_options()
+            .set_progress_callback(Some(&mut progress));
+        let o = add.as_ref().checkout_options();
+        let slots = (
+            o.notify_callback(),
+            o.progress_callback(),
+            o.perfdata_callback(),
+        );
+        assert_eq!(slots, (empty, rust, empty));
+        assert!(format!("{o:?}").contains("progress_callback: Rust"));
+        add.as_mut().checkout_options().set_progress_callback(None);
+        assert_eq!(add.as_ref().checkout_options().progress_callback(), empty);
+        let mut m = options.as_mut();
+        m.set_notify_callback(None);
+        m.set_perfdata_callback(None);
+        assert_eq!(options.as_ref().notify_callback(), empty);
+    }
+
+    #[test]
+    #[cfg_attr(miri, ignore = "spawns a process")]
+    fn callbacks_stored_in_the_options_run_during_the_add() {
+        isolated(
+            concat!(
+                module_path!(),
+                "::callbacks_stored_in_the_options_run_during_the_add"
+            ),
+            callbacks_run_during_the_add,
+        );
     }
 }

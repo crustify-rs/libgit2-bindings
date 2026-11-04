@@ -1,0 +1,10 @@
+error[E0499]: cannot borrow `callback` as mutable more than once at a time
+  --> tests/ub_safe/compile_fail/checkout_options_callback_used_while_stored.rs:22:13
+   |
+14 |     options.as_mut().set_notify_callback(Some(&mut callback));
+   |                                               ------------- first mutable borrow occurs here
+...
+22 |     let _ = callback.call(note);
+   |             ^^^^^^^^ second mutable borrow occurs here
+23 |     let _ = options.as_ref().notify_callback();
+   |             ------- first borrow later used here

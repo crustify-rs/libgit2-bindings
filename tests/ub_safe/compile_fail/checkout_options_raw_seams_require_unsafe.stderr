@@ -1,23 +1,15 @@
-error[E0133]: call to unsafe function `CheckoutOptionsMut::<'_, 'o>::set_notify_callback` is unsafe and requires unsafe block
- --> tests/ub_safe/compile_fail/checkout_options_raw_seams_require_unsafe.rs:7:5
-  |
-7 |     m.set_notify_callback(None, std::ptr::null_mut());
-  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ call to unsafe function
-  |
-  = note: consult the function's documentation for information on how to avoid undefined behavior
+error[E0133]: dereference of raw pointer is unsafe and requires unsafe block
+  --> tests/ub_safe/compile_fail/checkout_options_raw_seams_require_unsafe.rs:10:5
+   |
+10 |     (*p).notify_cb = None;
+   |     ^^^^ dereference of raw pointer
+   |
+   = note: raw pointers may be null, dangling or unaligned; they can violate aliasing rules and cause data races: all of these are undefined behavior
 
-error[E0133]: call to unsafe function `CheckoutOptionsMut::<'_, 'o>::set_progress_callback` is unsafe and requires unsafe block
- --> tests/ub_safe/compile_fail/checkout_options_raw_seams_require_unsafe.rs:8:5
-  |
-8 |     m.set_progress_callback(None, std::ptr::null_mut());
-  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ call to unsafe function
-  |
-  = note: consult the function's documentation for information on how to avoid undefined behavior
-
-error[E0133]: call to unsafe function `CheckoutOptionsMut::<'_, 'o>::set_perfdata_callback` is unsafe and requires unsafe block
- --> tests/ub_safe/compile_fail/checkout_options_raw_seams_require_unsafe.rs:9:5
-  |
-9 |     m.set_perfdata_callback(None, std::ptr::null_mut());
-  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ call to unsafe function
-  |
-  = note: consult the function's documentation for information on how to avoid undefined behavior
+error[E0133]: dereference of raw pointer is unsafe and requires unsafe block
+  --> tests/ub_safe/compile_fail/checkout_options_raw_seams_require_unsafe.rs:11:5
+   |
+11 |     (*p).progress_payload = std::ptr::null_mut();
+   |     ^^^^ dereference of raw pointer
+   |
+   = note: raw pointers may be null, dangling or unaligned; they can violate aliasing rules and cause data races: all of these are undefined behavior

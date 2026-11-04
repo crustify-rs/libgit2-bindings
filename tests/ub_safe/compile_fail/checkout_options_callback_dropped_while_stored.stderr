@@ -1,0 +1,12 @@
+error[E0505]: cannot move out of `callback` because it is borrowed
+  --> tests/ub_safe/compile_fail/checkout_options_callback_dropped_while_stored.rs:12:10
+   |
+ 9 |     let mut callback = ProgressCallback::new(&mut record);
+   |         ------------ binding `callback` declared here
+10 |     let mut options = CheckoutOptions::new();
+11 |     options.as_mut().set_progress_callback(Some(&mut callback));
+   |                                                 ------------- borrow of `callback` occurs here
+12 |     drop(callback);
+   |          ^^^^^^^^ move out of `callback` occurs here
+13 |     let _ = options.as_ref().progress_callback();
+   |             ------- borrow later used here

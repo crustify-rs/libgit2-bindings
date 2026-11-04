@@ -519,11 +519,18 @@ pub(crate) mod worktree_add {
     }
 
     impl AddRepo {
+        pub(crate) fn new(tag: &str) -> Self {
+            Self::with_files(tag, &[])
+        }
+
+        /// As [`new`](Self::new), but `HEAD`'s tree holds `files`, each a name without
+        /// `/` and its content, which a checkout of it writes (loading filters, which
+        /// `TSan` reports against concurrent first loads: run such checkouts alone).
         #[expect(
             clippy::items_after_statements,
             reason = "each helper item sits beside the steps that use it"
         )]
-        pub(crate) fn new(tag: &str) -> Self {
+        pub(crate) fn with_files(tag: &str, files: &[(&str, &str)]) -> Self {
             super::init();
             let base = std::env::temp_dir().join(format!(
                 "crustify-worktree-add-ub-{}-{tag}",
@@ -539,7 +546,20 @@ pub(crate) mod worktree_add {
                 id.as_ref().to_hex_string().unwrap()
             };
             const WHO: &str = "A U Thor <author@example.com> 1700000000 +0000";
-            let tree = write(b"", ObjectType::Tree);
+            // A tree lists its entries sorted by name, each `<mode> <name>\0<raw id>`.
+            let mut sorted = files.to_vec();
+            sorted.sort_unstable();
+            let mut entries = Vec::new();
+            for (name, content) in sorted {
+                let blob = write(content.as_bytes(), ObjectType::Blob);
+                entries.extend_from_slice(format!("100644 {name}\0").as_bytes());
+                entries.extend(
+                    (0..blob.len())
+                        .step_by(2)
+                        .map(|i| u8::from_str_radix(&blob[i..i + 2], 16).unwrap()),
+                );
+            }
+            let tree = write(&entries, ObjectType::Tree);
             let commit = format!("tree {tree}\nauthor {WHO}\ncommitter {WHO}\n\nfirst\n");
             let commit = write(commit.as_bytes(), ObjectType::Commit);
             drop(odb);

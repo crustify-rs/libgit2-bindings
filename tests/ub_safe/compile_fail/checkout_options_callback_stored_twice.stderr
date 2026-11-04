@@ -1,0 +1,9 @@
+error[E0499]: cannot borrow `callback` as mutable more than once at a time
+  --> tests/ub_safe/compile_fail/checkout_options_callback_stored_twice.rs:12:48
+   |
+11 |     first.as_mut().set_perfdata_callback(Some(&mut callback));
+   |                                               ------------- first mutable borrow occurs here
+12 |     second.as_mut().set_perfdata_callback(Some(&mut callback));
+   |                                                ^^^^^^^^^^^^^ second mutable borrow occurs here
+13 |     let _ = (first.as_ref().perfdata_callback(), second.as_ref().perfdata_callback());
+   |              ----- first borrow later used here

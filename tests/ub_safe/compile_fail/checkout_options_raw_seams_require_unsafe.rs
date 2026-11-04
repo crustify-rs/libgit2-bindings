@@ -1,10 +1,12 @@
-// The raw seams store pointers the borrow checker cannot follow: each is `unsafe`.
+// The safe setters take Rust callbacks only; a C callback is stored through the raw seam,
+// whose pointer only an `unsafe` write goes through.
+use ffibox::CMutSeam;
 use libgit2::libgit2::src::libgit2::checkout::CheckoutOptions;
 
 fn main() {
     let mut options = CheckoutOptions::new();
     let mut m = options.as_mut();
-    m.set_notify_callback(None, std::ptr::null_mut());
-    m.set_progress_callback(None, std::ptr::null_mut());
-    m.set_perfdata_callback(None, std::ptr::null_mut());
+    let p = m.as_mut_ptr();
+    (*p).notify_cb = None;
+    (*p).progress_payload = std::ptr::null_mut();
 }

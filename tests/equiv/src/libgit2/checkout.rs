@@ -12,16 +12,22 @@
 //! options reach `git_checkout_tree` / `git_checkout_index` through their documented
 //! `#[repr(transparent)]` layout, which [`c_ptr`] relies on.
 //!
+//! The callbacks those sequences install on both sides are C callbacks, which the Rust
+//! options take through their raw seam ([`CMutSeam::as_mut_ptr`]), as C interop does, and
+//! report as [`CallbackSlot::Foreign`]; the payloads they store are read back through the
+//! seam too, since the getters hand out none.
+//!
 //! A [`ProgressCallback`] over a closure is then compared with a C progress callback the
 //! same way, each on its own fixture and over the same checkouts: both must see the same
-//! paths and counts, call for call. The Rust callback is reached through a C-ABI forwarder
-//! that hands each call to [`ProgressCallback::call`], since no wrapper of a checkout
-//! routine takes it yet.
+//! paths and counts, call for call. The Rust callback is stored in the options by their
+//! safe setter, which borrows it for the options' lifetime, so the Rust side builds its
+//! options afresh for each step (every step sets every field, so this changes nothing
+//! libgit2 reads).
 //!
-//! A [`NotifyCallback`] and a [`PerfdataCallback`] over closures are compared with C
-//! notification and performance callbacks the same way: both sides must see the same
-//! reasons, paths and sides, cancel the same checkouts, and see the same counters, call
-//! for call. A cancelling C callback returns `GIT_EUSER` there, the code a
+//! A [`NotifyCallback`] and a [`PerfdataCallback`] over closures, stored by the safe
+//! setters, are compared with C notification and performance callbacks the same way: both sides
+//! must see the same reasons, paths and sides, cancel the same checkouts, and see the same
+//! counters, call for call. A cancelling C callback returns `GIT_EUSER` there, the code a
 //! [`ControlFlow::Break`] becomes.
 
 use std::cell::RefCell;
@@ -34,12 +40,12 @@ use std::process::Command;
 use std::sync::OnceLock;
 use std::{fs, ptr};
 
-use ffibox::CRefSeam;
+use ffibox::{CMutSeam, CRefSeam};
 use glibc_bindings::libc::ffi as libc;
 use libgit2::ffi;
 use libgit2::libgit2::src::libgit2::checkout::{
-    CheckoutNotification, CheckoutOptions, CheckoutOptionsRef, CheckoutPerfdata,
-    CheckoutPerfdataRef, NotifyCallback, PerfdataCallback, ProgressCallback,
+    CallbackSlot, CheckoutNotification, CheckoutOptions, CheckoutOptionsMut, CheckoutOptionsRef,
+    CheckoutPerfdata, CheckoutPerfdataRef, NotifyCallback, PerfdataCallback, ProgressCallback,
 };
 use libgit2::libgit2::src::libgit2::diff::DiffFileRef;
 use libgit2::libgit2::src::libgit2::index::IndexArc;
@@ -86,6 +92,37 @@ fn c_last(root: &Path) -> (c_int, String) {
         }
     };
     (class, message.replace(root.to_str().unwrap(), "<root>"))
+}
+
+/// One slot's C callback and its payload.
+type Slot<F> = (F, *mut c_void);
+
+/// Stores C callbacks and their payloads in `m`'s options through their raw seam, as C
+/// interop does: the safe setters store Rust callbacks only. `None` leaves a slot as it
+/// is. The caller vouches that each callback is sound for whatever libgit2 passes it, and
+/// its payload valid for what it does with it, for as long as the options live.
+fn store_c_callbacks(
+    m: &mut CheckoutOptionsMut<'_, '_>,
+    notify: Option<Slot<ffi::git_checkout_notify_cb>>,
+    progress: Option<Slot<ffi::git_checkout_progress_cb>>,
+    perfdata: Option<Slot<ffi::git_checkout_perfdata_cb>>,
+) {
+    let p = m.as_mut_ptr();
+    // SAFETY: `p` addresses the live options `m` borrows exclusively, read whole: plain
+    // data, integers and pointers.
+    let mut raw = unsafe { p.read() };
+    if let Some((callback, payload)) = notify {
+        (raw.notify_cb, raw.notify_payload) = (callback, payload);
+    }
+    if let Some((callback, payload)) = progress {
+        (raw.progress_cb, raw.progress_payload) = (callback, payload);
+    }
+    if let Some((callback, payload)) = perfdata {
+        (raw.perfdata_cb, raw.perfdata_payload) = (callback, payload);
+    }
+    // SAFETY: as above, written back whole; the fields are plain data, so the old values
+    // need no drop.
+    unsafe { p.write(raw) };
 }
 
 /// The C struct a [`CheckoutOptions`] is laid out as: `#[repr(transparent)]` over
@@ -512,31 +549,23 @@ impl Step {
             Baseline::Head | Baseline::Index => None,
         });
         m.set_baseline_index((self.baseline == Baseline::Index).then(|| f.index_ref.as_ref()));
-        // SAFETY: the callbacks are sound for any arguments libgit2 passes, and the
-        // payload is a `RefCell<Log>`, which outlives the options.
-
-        match self.notify {
-            // SAFETY: as above.
-            Notify::Off => unsafe { m.set_notify_callback(None, ptr::null_mut()) },
-            // SAFETY: as above.
-            Notify::On | Notify::Cancel(_) => unsafe { m.set_notify_callback(NOTIFY, payload) },
-        }
-
-        if self.progress {
-            // SAFETY: as above.
-            unsafe { m.set_progress_callback(PROGRESS, payload) };
+        // The callbacks are sound for any arguments libgit2 passes, and the payload is a
+        // `RefCell<Log>`, which outlives the options.
+        let notify = match self.notify {
+            Notify::Off => (None, ptr::null_mut()),
+            Notify::On | Notify::Cancel(_) => (NOTIFY, payload),
+        };
+        let progress = if self.progress {
+            (PROGRESS, payload)
         } else {
-            // SAFETY: as above.
-            unsafe { m.set_progress_callback(None, ptr::null_mut()) };
-        }
-
-        if self.perfdata {
-            // SAFETY: as above.
-            unsafe { m.set_perfdata_callback(PERFDATA, payload) };
+            (None, ptr::null_mut())
+        };
+        let perfdata = if self.perfdata {
+            (PERFDATA, payload)
         } else {
-            // SAFETY: as above.
-            unsafe { m.set_perfdata_callback(None, ptr::null_mut()) };
-        }
+            (None, ptr::null_mut())
+        };
+        store_c_callbacks(&mut m, Some(notify), Some(progress), Some(perfdata));
 
         if self.paths.is_empty() {
             m.clear_paths();
@@ -596,7 +625,9 @@ struct Outcome {
     log: Log,
 }
 
-/// The options' fields, comparable across fixtures: pointers by what they designate.
+/// The options' fields, comparable across fixtures: pointers by what they designate. A
+/// set callback slot of the Rust options must be a foreign one, since both sides store C
+/// callbacks.
 #[derive(Debug, PartialEq)]
 struct Fields {
     version: u32,
@@ -648,7 +679,8 @@ fn c_fields(o: &ffi::git_checkout_options, f: &Fixture, log: &RefCell<Log>) -> F
 
 fn rust_fields(o: CheckoutOptionsRef<'_, '_>, f: &Fixture, log: &RefCell<Log>) -> Fields {
     let payload = ptr::from_ref(log).cast_mut().cast::<c_void>();
-    let callback = |(set, p): (bool, *mut c_void)| (set, p == payload);
+    // SAFETY: `o` borrows live options, read whole: plain data, integers and pointers.
+    let raw = unsafe { o.as_ptr().read() };
     let text = |s: Option<&CStr>| {
         s.map(|s| {
             s.to_string_lossy()
@@ -666,9 +698,18 @@ fn rust_fields(o: CheckoutOptionsRef<'_, '_>, f: &Fixture, log: &RefCell<Log>) -
             o.notify_flags(),
         ),
         callbacks: [
-            callback((o.notify_callback().0.is_some(), o.notify_callback().1)),
-            callback((o.progress_callback().0.is_some(), o.progress_callback().1)),
-            callback((o.perfdata_callback().0.is_some(), o.perfdata_callback().1)),
+            (
+                o.notify_callback() == CallbackSlot::Foreign,
+                raw.notify_payload == payload,
+            ),
+            (
+                o.progress_callback() == CallbackSlot::Foreign,
+                raw.progress_payload == payload,
+            ),
+            (
+                o.perfdata_callback() == CallbackSlot::Foreign,
+                raw.perfdata_payload == payload,
+            ),
         ],
         paths: o
             .paths()
@@ -1255,9 +1296,9 @@ fn perfdata_reads_match_c_after_every_checkout() {
     {
         let mut m = options.as_mut();
         m.set_strategy(GIT_CHECKOUT_FORCE);
-        // SAFETY: the callback reads its arguments as libgit2 passes them, and the payload
-        // is `reads`, which outlives every checkout these options run.
-        unsafe { m.set_perfdata_callback(Some(perfdata_reads), payload) };
+        // The callback reads its arguments as libgit2 passes them, and the payload is
+        // `reads`, which outlives every checkout these options run.
+        store_c_callbacks(&mut m, None, None, Some((Some(perfdata_reads), payload)));
     }
     // (tree, target directory, directory mode): a fresh target, an update of it, a
     // checkout changing nothing, and another fresh target with another mode.
@@ -1299,22 +1340,11 @@ fn perfdata_reads_match_c_after_every_checkout() {
     assert_ne!(reads.copies[0], reads.copies[1], "{reads:?}");
 }
 
-/// Hands libgit2's progress arguments to the [`ProgressCallback`] at `payload`, through
-/// [`ProgressCallback::call`], which runs the trampoline libgit2 would call: no wrapper of a
-/// checkout routine takes the callback yet.
-extern "C" fn forward(path: *const c_char, completed: usize, total: usize, payload: *mut c_void) {
-    // SAFETY: the payload `compare_progress` installs is its callback, which nothing else
-    // uses while a checkout runs.
-    let callback = unsafe { &mut *payload.cast::<ProgressCallback<'_>>() };
-    // SAFETY: libgit2 passes NULL or a NUL-terminated string live for the call.
-    let path = (!path.is_null()).then(|| unsafe { CStr::from_ptr(path) });
-    callback.call(path, completed, total);
-}
-
 /// Runs `steps`, each with a progress callback, on two independent fixtures, each first
 /// set up by `prepare` (such as [`Fixture::add_conflict`]): a C callback on a C struct, and
-/// a [`ProgressCallback`] over a closure on a [`CheckoutOptions`]. After every step, both
-/// checkouts must have done the same, and both callbacks seen the same calls.
+/// a [`ProgressCallback`] over a closure, which the safe setter stores, on a
+/// [`CheckoutOptions`] built for the step. After every step, both checkouts must have done
+/// the same, and both callbacks seen the same calls.
 fn compare_progress(tag: &str, prepare: fn(&mut Fixture), steps: &[Step]) -> Vec<Outcome> {
     let (mut cf, mut rf) = (
         Fixture::new(&format!("{tag}-c")),
@@ -1333,14 +1363,12 @@ fn compare_progress(tag: &str, prepare: fn(&mut Fixture), steps: &[Step]) -> Vec
         rlog.borrow_mut().progress.push((path, completed, total));
     };
     let mut callback = ProgressCallback::new(&mut record);
-    let payload = ptr::from_mut(&mut callback).cast::<c_void>();
 
     let mut c = ffi::git_checkout_options::default();
     // SAFETY: `c` is writable storage for the struct; version 1 is accepted.
     let rc =
         unsafe { ffi::git_checkout_options_init(&raw mut c, ffi::GIT_CHECKOUT_OPTIONS_VERSION) };
     assert_eq!(rc, 0);
-    let mut rust = CheckoutOptions::new();
     let mut outcomes = Vec::new();
     for (i, step) in steps.iter().enumerate() {
         let step = Step {
@@ -1348,10 +1376,10 @@ fn compare_progress(tag: &str, prepare: fn(&mut Fixture), steps: &[Step]) -> Vec
             ..*step
         };
         step.apply_c(&mut c, &cf, &clog, &c_paths[i]);
+        let mut rust = CheckoutOptions::new();
         step.apply_rust(&mut rust, &rf, &rlog, &views[i]);
-        // SAFETY: `forward` hands every call to the callback at `payload`, which outlives
-        // the options and which only the checkouts below use.
-        unsafe { rust.as_mut().set_progress_callback(Some(forward), payload) };
+        rust.as_mut().set_progress_callback(Some(&mut callback));
+        assert_eq!(rust.as_ref().progress_callback(), CallbackSlot::Rust);
         let expected = step.checkout(&cf, &clog, &raw const c);
         let actual = step.checkout(&rf, &rlog, c_ptr(&rust));
         assert_eq!(actual, expected, "checkout at step {i}: {step:?}");
@@ -1476,53 +1504,12 @@ fn a_progress_callback_sees_conflicts_as_a_c_callback() {
     );
 }
 
-/// Hands libgit2's notification arguments to the [`NotifyCallback`] at `payload`, through
-/// [`NotifyCallback::call`], which runs the trampoline libgit2 would call, and returns its
-/// verdict as the trampoline does.
-extern "C" fn forward_notify(
-    why: ffi::git_checkout_notify_t,
-    path: *const c_char,
-    baseline: *const ffi::git_diff_file,
-    target: *const ffi::git_diff_file,
-    workdir: *const ffi::git_diff_file,
-    payload: *mut c_void,
-) -> c_int {
-    // SAFETY: the payload `compare_callbacks` installs is its notification callback, which
-    // nothing else uses while a checkout runs.
-    let callback = unsafe { &mut *payload.cast::<NotifyCallback<'_>>() };
-    // SAFETY: libgit2 passes NULL or a NUL-terminated string live for the call.
-    let path = (!path.is_null()).then(|| unsafe { CStr::from_ptr(path) });
-    // SAFETY: libgit2 passes NULL or a diff file live and unchanged for the call.
-    let file = |f: *const ffi::git_diff_file| unsafe { DiffFileRef::from_ptr(f.cast_mut()) };
-    let notification = CheckoutNotification {
-        why,
-        path,
-        baseline: file(baseline),
-        target: file(target),
-        workdir: file(workdir),
-    };
-    match callback.call(notification) {
-        ControlFlow::Continue(()) => 0,
-        ControlFlow::Break(()) => ffi::GIT_EUSER,
-    }
-}
-
-/// Hands libgit2's counters to the [`PerfdataCallback`] at `payload`, through
-/// [`PerfdataCallback::call`].
-extern "C" fn forward_perfdata(data: *const ffi::git_checkout_perfdata, payload: *mut c_void) {
-    // SAFETY: the payload `compare_callbacks` installs is its performance-data callback,
-    // which nothing else uses while a checkout runs.
-    let callback = unsafe { &mut *payload.cast::<PerfdataCallback<'_>>() };
-    // SAFETY: libgit2 lends its live counters for the call.
-    let data = unsafe { CheckoutPerfdataRef::from_ptr(data.cast_mut()) }.unwrap();
-    callback.call(data);
-}
-
 /// Runs `steps` on two independent fixtures (`conflict` adds the index conflict to
 /// both): with the C notification and performance callbacks on a C struct, and with a
 /// [`NotifyCallback`] and a [`PerfdataCallback`] over closures, logging as the C ones do,
-/// on a [`CheckoutOptions`]. After every step, both checkouts must have done the same,
-/// and both pairs of callbacks seen the same calls.
+/// which the safe setters store, on a [`CheckoutOptions`] built for the step. After every
+/// step, both checkouts must have done the same, and both pairs of callbacks seen the same
+/// calls.
 fn compare_callbacks(tag: &str, conflict: bool, steps: &[Step]) -> Vec<Outcome> {
     let (cf, rf) = (
         Fixture::new(&format!("{tag}-c")),
@@ -1557,29 +1544,34 @@ fn compare_callbacks(tag: &str, conflict: bool, steps: &[Step]) -> Vec<Outcome> 
     };
     let mut notify = NotifyCallback::new(&mut record_notify);
     let mut perfdata = PerfdataCallback::new(&mut record_perfdata);
-    let notify_payload = ptr::from_mut(&mut notify).cast::<c_void>();
-    let perfdata_payload = ptr::from_mut(&mut perfdata).cast::<c_void>();
 
     let mut c = ffi::git_checkout_options::default();
     // SAFETY: `c` is writable storage for the struct; version 1 is accepted.
     let rc =
         unsafe { ffi::git_checkout_options_init(&raw mut c, ffi::GIT_CHECKOUT_OPTIONS_VERSION) };
     assert_eq!(rc, 0);
-    let mut rust = CheckoutOptions::new();
     let mut outcomes = Vec::new();
     for (i, step) in steps.iter().enumerate() {
         step.apply_c(&mut c, &cf, &clog, &c_paths[i]);
+        let mut rust = CheckoutOptions::new();
         step.apply_rust(&mut rust, &rf, &rlog, &views[i]);
         let mut m = rust.as_mut();
         if !matches!(step.notify, Notify::Off) {
-            // SAFETY: `forward_notify` hands every call to the callback at its payload,
-            // which outlives the options and which only the checkouts below use.
-            unsafe { m.set_notify_callback(Some(forward_notify), notify_payload) };
+            m.set_notify_callback(Some(&mut notify));
         }
         if step.perfdata {
-            // SAFETY: as above, for `forward_perfdata`.
-            unsafe { m.set_perfdata_callback(Some(forward_perfdata), perfdata_payload) };
+            m.set_perfdata_callback(Some(&mut perfdata));
         }
+        let slots = (m.as_ref().notify_callback(), m.as_ref().perfdata_callback());
+        let rust_if = |on| {
+            if on {
+                CallbackSlot::Rust
+            } else {
+                CallbackSlot::Empty
+            }
+        };
+        let on = (!matches!(step.notify, Notify::Off), step.perfdata);
+        assert_eq!(slots, (rust_if(on.0), rust_if(on.1)), "step {i}");
         let mut expected = step.checkout(&cf, &clog, &raw const c);
         let mut actual = step.checkout(&rf, &rlog, c_ptr(&rust));
         if expected.rc == ffi::GIT_EUSER {
@@ -1771,13 +1763,14 @@ fn perfdata_reads_match_c_on_links_update_only_and_a_failed_index_write() {
     let reads = RefCell::new(PerfdataReads::default());
     let payload = ptr::from_ref(&reads).cast_mut().cast::<c_void>();
     let mut options = CheckoutOptions::new();
-    // SAFETY: the callback reads its arguments as libgit2 passes them, and the payload is
-    // `reads`, which outlives every checkout these options run.
-    unsafe {
-        options
-            .as_mut()
-            .set_perfdata_callback(Some(perfdata_reads), payload);
-    };
+    // The callback reads its arguments as libgit2 passes them, and the payload is `reads`,
+    // which outlives every checkout these options run.
+    store_c_callbacks(
+        &mut options.as_mut(),
+        None,
+        None,
+        Some((Some(perfdata_reads), payload)),
+    );
     let lock = f.work.join(".git/index.lock");
     // (tree, strategy, target directory, index locked, expected return).
     let steps = [

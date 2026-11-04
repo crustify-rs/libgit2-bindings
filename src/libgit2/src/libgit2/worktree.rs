@@ -854,7 +854,8 @@ pub type WorktreeBox = CBox<Worktree, WorktreeFree>;
 /// ```
 ///
 /// Neither `Send` nor `Sync`, as neither its reference (which reaches its repository)
-/// nor its checkout options (whose raw seams carry payloads) are:
+/// nor its checkout options (whose callbacks borrow closures, and whose foreign callbacks
+/// carry payloads) are:
 ///
 /// ```compile_fail,E0277
 /// use libgit2::libgit2::src::libgit2::worktree::AddOptions;
@@ -863,8 +864,8 @@ pub type WorktreeBox = CBox<Worktree, WorktreeFree>;
 /// send(AddOptions::new());
 /// ```
 ///
-/// Not `Clone`, as its checkout options are not: their callbacks' payloads may be
-/// exclusive borrows, which a copy would alias. Build another with [`new`](Self::new).
+/// Not `Clone`, as its checkout options are not: the callbacks they store are exclusive
+/// borrows, which a copy would alias. Build another with [`new`](Self::new).
 ///
 /// ```compile_fail,E0277
 /// use libgit2::libgit2::src::libgit2::worktree::AddOptions;
@@ -1559,7 +1560,10 @@ impl Worktree {
     /// cannot be made leaves the administrative directory alone behind, and the branch
     /// a failed add created stays.
     ///
-    /// libgit2 reads the options, and copies the reference, for the call only.
+    /// libgit2 reads the options, and copies the reference, for the call only. The callbacks
+    /// stored in their checkout options run during the checkout of the new worktree; a panic
+    /// one of them raised resumes once libgit2 has returned, after the worktree it made, if
+    /// any, is dropped (its files and branch stay, as after a failure).
     ///
     /// Wraps `fn::git_worktree_add`
     ///
@@ -1599,43 +1603,52 @@ impl Worktree {
             }
             _ => None,
         };
+        // The callbacks the checkout options store, in `opts` and so in its copy, resume
+        // their panics once libgit2 has returned and the worktree it made is dropped.
+        let checkout = opts.map(|o| o.checkout_options());
         let opts = match (&substituted, opts) {
             (Some(copy), _) => ptr::from_ref(copy),
             (None, Some(o)) => o.as_ptr(),
             (None, None) => ptr::null(),
         };
-        let mut out = ptr::null_mut();
-        let rc = checked(
-            || {
-                // The options are of the current version (no setter changes it); their
-                // reference is attached and borrowed, with its repository, for `'o`, which
-                // outlives this call (or is `local`, which outlives it too), as do their
-                // checkout options' borrows.
-                // SAFETY: `out` is a writable slot the routine NULLs first; `repo` a live
-                // repository on this thread with a common directory; `name` and `path`
-                // NUL-terminated, copied; `opts` NULL or live options, copied and read for
-                // the call only.
-                unsafe {
-                    ffi::git_worktree_add(
-                        &raw mut out,
-                        repo.as_ptr().cast_mut(),
-                        name.as_ptr(),
-                        path.as_ptr(),
-                        opts,
-                    )
+        let add = || {
+            let mut out = ptr::null_mut();
+            let rc = checked(
+                || {
+                    // The options are of the current version (no setter changes it); their
+                    // reference is attached and borrowed, with its repository, for `'o`,
+                    // which outlives this call (or is `local`, which outlives it too), as do
+                    // their checkout options' borrows and callbacks.
+                    // SAFETY: `out` is a writable slot the routine NULLs first; `repo` a live
+                    // repository on this thread with a common directory; `name` and `path`
+                    // NUL-terminated, copied; `opts` NULL or live options, copied and read
+                    // for the call only.
+                    unsafe {
+                        ffi::git_worktree_add(
+                            &raw mut out,
+                            repo.as_ptr().cast_mut(),
+                            name.as_ptr(),
+                            path.as_ptr(),
+                            opts,
+                        )
+                    }
+                },
+                generic,
+            )?;
+            // SAFETY: `out` is NULL, or (on a 0 return) the fresh worktree
+            // `git_worktree_lookup` built, whose strings are all copies, owned by the caller
+            // alone and released by `git_worktree_free`.
+            match unsafe { WorktreeBox::from_c(out) } {
+                Some(worktree) if rc == 0 => Ok(worktree),
+                worktree => {
+                    drop(worktree);
+                    Err(WorktreeError::from_libgit2(ffi::GIT_ERROR, generic(rc)))
                 }
-            },
-            generic,
-        )?;
-        // SAFETY: `out` is NULL, or (on a 0 return) the fresh worktree
-        // `git_worktree_lookup` built, whose strings are all copies, owned by the caller
-        // alone and released by `git_worktree_free`.
-        match unsafe { WorktreeBox::from_c(out) } {
-            Some(worktree) if rc == 0 => Ok(worktree),
-            worktree => {
-                drop(worktree);
-                Err(WorktreeError::from_libgit2(ffi::GIT_ERROR, generic(rc)))
             }
+        };
+        match checkout {
+            Some(checkout) => checkout.walk_with(|_| add()),
+            None => add(),
         }
     }
 }

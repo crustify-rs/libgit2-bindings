@@ -59,11 +59,11 @@ in Notes.
 
 | | count | share | C LoC coverage | Rust LoC coverage |
 |---|---:|---:|---:|---:|
-| UB safe tests | `688` | — | `28.10`% | `79.28`% |
-| UB unsafe tests | `100` | — | `22.12`% | `12.81`% |
-| Equiv tests | `489` | — | `43.47`% | `75.93`% |
-| Unit tests | `787` | — | `32.03`% | `87.34`% |
-| **Total tests** | **`2064`** | — | **`45.95`%** | **`98.92`%** |
+| UB safe tests | `694` | — | `28.38`% | `79.75`% |
+| UB unsafe tests | `91` | — | `19.36`% | `12.13`% |
+| Equiv tests | `489` | — | `43.44`% | `75.60`% |
+| Unit tests | `791` | — | `32.00`% | `87.46`% |
+| **Total tests** | **`2065`** | — | **`45.87`%** | **`98.93`%** |
 | total types | `258` | — | — | — |
 | ported types | `0` | `0.00`% | — | — |
 | wrapped types | `105` | `40.70`% | — | — |
@@ -212,6 +212,7 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/src/libgit2/odb.c` | `180` | `0` | first | `1` | `16` | `+1599/-22` | — | `$9.04` | `25.94M` | `33m36s` | `$9.04` | `$0.56` |
 | `libgit2/src/libgit2/diff_parse.c` | `228` | `0` | first | `1` | `2` | `+756/-8` | — | `$3.11` | `7.21M` | `15m29s` | `$3.11` | `$1.55` |
 | `libgit2/src/libgit2/checkout.c` | `330` | `0` | first | `1` | `3` | `+490/-4` | — | `$4.39` | `11.97M` | `17m30s` | `$4.39` | `$1.46` |
+| `libgit2/src/libgit2/checkout.c` | `334` | `0` | first | `1` | `20` | `+1435/-433` | `45.87`% / `98.93`% | — | — | — | — | — |
 | `libgit2/util` | `6` | `0` | review | `2` | `5` | `+172/-15` | `1.63`% / `99.74`% | `$20.66` | `23.31M` | `48m16s` | `$10.33` | `$4.13` |
 | `libgit2/util` | `6` | `1` | review | `2` | `0` | `+149/-12` | `1.63`% / `98.42`% | `$7.58` | `10.10M` | `18m18s` | `$3.79` | — |
 | `libgit2/oid` | `11` | `0` | review | `2` | `2` | `+224/-6` | `7.81`% / `99.48`% | `$14.93` | `18.05M` | `29m10s` | `$7.46` | `$7.46` |
@@ -237,7 +238,7 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/src/libgit2/odb.c` | `181` | `0` | review | `1` | `16` | `+39/-14` | — | `$7.12` | `20.62M` | `23m15s` | `$7.12` | `$0.45` |
 | `libgit2/src/libgit2/diff_parse.c` | `229` | `0` | review | `1` | `2` | `+6/-3` | — | `$4.69` | `10.34M` | `36m13s` | `$4.69` | `$2.34` |
 | `libgit2/src/libgit2/checkout.c` | `331` | `0` | review | `1` | `3` | `+103/-5` | — | `$3.73` | `10.13M` | `16m05s` | `$3.73` | `$1.24` |
-| **Σ first** |  |  |  | **`104`** | **`192`** | **`+96107/-2093`** | **`45.85`% / `99.54`%** | **`$570.27`** | **`1380.95M`** | — | **`$5.48`** | **`$2.97`** |
+| **Σ first** |  |  |  | **`105`** | **`212`** | **`+97542/-2526`** | **`45.87`% / `98.93`%** | **`$570.27`** | **`1380.95M`** | — | **`$5.48`** | **`$2.97`** |
 | **Σ review** |  |  |  | **`104`** | **`192`** | **`+9486/-2068`** | **`46.57`% / `99.53`%** | **`$409.88`** | **`669.07M`** | — | **`$3.94`** | **`$2.13`** |
 
 ### Batches — wrap: tests
@@ -311,6 +312,7 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/src/libgit2/odb.c` | `180` | `0` | first | `+5` (—/— pp) | `+0` (—/— pp) | `+3` (—/— pp) | `+6` (—/— pp) |
 | `libgit2/src/libgit2/diff_parse.c` | `228` | `0` | first | `+4` (—/— pp) | `+0` (—/— pp) | `+3` (—/— pp) | `+5` (—/— pp) |
 | `libgit2/src/libgit2/checkout.c` | `330` | `0` | first | `+2` (—/— pp) | `+0` (—/— pp) | `+1` (—/— pp) | `+5` (—/— pp) |
+| `libgit2/src/libgit2/checkout.c` | `334` | `0` | first | `+6` (`+0.27`/`+0.47` pp) | `-9` (`-2.75`/`-0.68` pp) | `+0` (`+0.00`/`-0.33` pp) | `+4` (`+0.01`/`+0.12` pp) |
 | `libgit2/util` | `6` | `0` | review | `+0` (`+0.00`/`+0.00` pp) | `+1` (`+0.00`/`+0.00` pp) | `+0` (`+0.00`/`+0.00` pp) | `+2` (`+0.00`/`+0.00` pp) |
 | `libgit2/util` | `6` | `1` | review | `+0` (`+0.00`/`-0.44` pp) | `+0` (`+0.00`/`-0.79` pp) | `+1` (`+0.27`/`-0.49` pp) | `+1` (`+0.00`/`+0.20` pp) |
 | `libgit2/oid` | `11` | `0` | review | `+1` (`+0.00`/`+0.32` pp) | `+0` (`+0.00`/`-0.39` pp) | `+1` (`+0.00`/`-0.61` pp) | `+4` (`+0.00`/`+0.57` pp) |
@@ -336,7 +338,7 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/src/libgit2/odb.c` | `181` | `0` | review | `+0` (—/— pp) | `+0` (—/— pp) | `+0` (—/— pp) | `+0` (—/— pp) |
 | `libgit2/src/libgit2/diff_parse.c` | `229` | `0` | review | `+0` (—/— pp) | `+0` (—/— pp) | `+0` (—/— pp) | `+0` (—/— pp) |
 | `libgit2/src/libgit2/checkout.c` | `331` | `0` | review | `+0` (—/— pp) | `+0` (—/— pp) | `+1` (—/— pp) | `+0` (—/— pp) |
-| **Σ first** |  |  |  | **`+453` (`+24.85`/`-2.70` pp)** | **`+55` (`+16.78`/`-52.20` pp)** | **`+257` (`+31.12`/`-24.83` pp)** | **`+472` (`+12.61`/`+24.41` pp)** |
+| **Σ first** |  |  |  | **`+459` (`+25.12`/`-2.23` pp)** | **`+46` (`+14.03`/`-52.88` pp)** | **`+257` (`+31.12`/`-25.16` pp)** | **`+476` (`+12.62`/`+24.53` pp)** |
 | **Σ review** |  |  |  | **`+35` (`+0.37`/`+2.20` pp)** | **`+3` (`-0.40`/`-5.36` pp)** | **`+23` (`+2.71`/`-1.21` pp)** | **`+39` (`+4.66`/`+2.36` pp)** |
 
 ### Batches — port
@@ -430,6 +432,7 @@ Deterministic `ffimap`; no model.
 | `libgit2/src/libgit2/odb.c` | `180` | `0` | wrap | first | `-2` | `-2` | `+0` | `+1` | — | — | `+0.14` pp | `+51` | `+0` | — | `+0` | `+0` |
 | `libgit2/src/libgit2/diff_parse.c` | `228` | `0` | wrap | first | `+0` | `+0` | `+0` | `+0` | — | — | `-0.05` pp | `+10` | `+6` | — | `+0` | `+0` |
 | `libgit2/src/libgit2/checkout.c` | `330` | `0` | wrap | first | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `+14` | `+6` | — | `+0` | `+0` |
+| `libgit2/src/libgit2/checkout.c` | `334` | `0` | wrap | first | `-3` | `-6` | `-6` | `-3` | — | — | `+0.01` pp | `+26` | `+0` | — | `+0` | `+12` |
 | `libgit2/util` | `6` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `+0` | — | — | `+0` | `+0` |
 | `libgit2/util` | `6` | `1` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `-0.04` pp | `+2` | — | — | `+0` | `+0` |
 | `libgit2/oid` | `11` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `-0.18` pp | `+0` | — | — | `+0` | `+0` |
@@ -455,7 +458,7 @@ Deterministic `ffimap`; no model.
 | `libgit2/src/libgit2/odb.c` | `181` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `+0` | `+0` | — | `+0` | `+0` |
 | `libgit2/src/libgit2/diff_parse.c` | `229` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `+0` | `+0` | — | `+0` | `+0` |
 | `libgit2/src/libgit2/checkout.c` | `331` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `+0` | `+0` | — | `+0` | `+0` |
-| **Σ first** |  |  |  |  | **`+4`** | **`+9`** | **`+8`** | **`+16`** | — | — | **`-0.52` pp** | **`+1132`** | — | — | **`+7`** | **`+7`** |
+| **Σ first** |  |  |  |  | **`+1`** | **`+3`** | **`+2`** | **`+13`** | — | — | **`-0.51` pp** | **`+1158`** | — | — | **`+7`** | **`+19`** |
 | **Σ review** |  |  |  |  | **`+0`** | **`+0`** | **`+0`** | **`-3`** | — | — | **`-0.14` pp** | **`+20`** | — | — | **`+0`** | **`-2`** |
 
 ### Batches — review: PoC + reports
@@ -1651,6 +1654,53 @@ ffibox pin drift fail. The Miri gate's `lib` and `equiv` binaries were rerun, th
 code the merge combines, and passed with 366 and 32 tests. The checkout unit, `ub_safe` and
 `equiv` tests were rerun under ASan+UBSan and TSan and pass. Neither side changed non-test
 code beyond docs, so the safety audit row and the `ub_unsafe` Miri result stand.
+
+### `libgit2/src/libgit2/checkout.c` wave 334 batch 0: `git_checkout_options` callbacks
+
+`CheckoutOptions` is re-bound with the callback wrappers waves 330 and 332 added. The
+setters `set_notify_callback`, `set_progress_callback` and `set_perfdata_callback` are safe:
+each takes an `Option<&'o mut …Callback<'_>>`, which the options borrow exclusively for their
+lifetime, and stores the module's trampoline as `*_cb` and the callback itself as
+`*_payload`. The getters return a `CallbackSlot` (`Empty`, `Rust` or `Foreign`) instead of
+the raw function and payload. `Rust` means the slot holds the trampoline, compared with
+`ptr::fn_addr_eq`, and a payload. Options C filled in, and the checkout options a
+`git_worktree_add_options` embeds, can hold C callbacks that no Rust wrapper stored. Those are
+`Foreign` and are left alone, and C interop installs C callbacks through the raw seam,
+`CMutSeam::as_mut_ptr`. A panic of a stored callback resumes from the crate-private
+`CheckoutOptionsRef::walk_with`, which wraps the routine's C call. `Worktree::add` now uses it
+for its embedded options, and the checkout routines' wrappers (wave 356) will too. A closure
+can reach its own options through interior mutability (a `RefCell`, which the `ub_safe` test
+compiles) and check out with them again. So each callback carries a `busy` flag, and the
+trampolines no longer hold a `&mut` to the callback across the closure. A nested call cancels
+(notify, `GIT_EUSER`) or skips (progress, perfdata). Miri runs the unit tests that drive the
+trampolines through the options' fields, the nested calls included. The rebase wrappers must
+also keep stored callbacks alive across a rebase, since `git_rebase_init` keeps the payloads.
+
+`ub_unsafe`'s checkout suite tested only the three removed `unsafe fn`s, so it is retired
+(`-9`). Its scenarios move to `ub_safe`, which runs real checkouts through `Worktree::add`:
+callbacks run, a break cancels, panics resume after the worktree box is freed, a nested add
+finds the callback busy, and threads share nothing. Each runs in an `isolated` child, since
+the checkouts load filters. The compile-fail case `checkout_options_raw_seams_require_unsafe`
+now writes through the seam, and three new cases reject a stored callback that is dropped,
+called, or stored twice. The equivalence suite's option sequences still install C callbacks,
+through the seam. Its callback comparisons store the Rust callbacks with the safe setters on
+options built for each step, since a stored callback stays borrowed for the options'
+lifetime. That removes the C-ABI forwarders.
+
+Coverage was measured with `crustify/scripts/coverage/` on this tree and, for the `pp` cells,
+on the wave base (`14822244e`) in the same environment. The base there reads `45.89`% /
+`98.92`%, where the table's `1e732ebff` figures read `45.95`%. Against the base, the C union
+loses 30 lines and gains 14, in files this batch does not touch (`httpclient.c`,
+`patch_parse.c`, …), except one line of `fs_path.h` that only the retired suite reached.
+`checkout.rs` is fully line-covered. The safety audit row compares `ffimap` scans of the wave
+base and this tree (`a15f6f3`, the ten seams). The three `unsafe fn`s and the three raw-pointer
+getters leave the public interface. `deref outside impl` is `+12`: each trampoline now
+dereferences its payload five times instead of once. The one new `Clone` is derived, on
+`CallbackSlot`. ASan+UBSan and TSan ran the batch's unit, `ub_safe` and `equiv` tests. Each
+new `ub_safe` test marked `ignore` under Miri was run there alone and stops at the child's
+spawn (`readlink`) or at `git_checkout_options_init`. No test of the batch is expected to
+trigger BorrowSanitizer, so none ran under it. The five compile-fail snapshots of other
+modules still mismatch from the ffibox pin drift.
 
 ### Parallelism and review caps from `libgit2/repository`
 
