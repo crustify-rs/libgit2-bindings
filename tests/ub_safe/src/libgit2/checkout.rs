@@ -623,3 +623,170 @@ fn perfdata_copies_cross_threads_and_shared_values_are_read_concurrently() {
     });
     assert_eq!(perfdata_counts(exclusive.as_ref()), (9, 13, 2));
 }
+
+/// The `ProgressCallback` tests: it is called through its `extern "C"` trampoline, as
+/// libgit2 calls it, and lends its closure each path for the call only. The paths come
+/// from allocations of exactly their length, released right after the call (`ASan`), and
+/// the closures copy what they keep. A panic never crosses the trampoline: it resumes from
+/// `call`, after which the callback runs its closure again. Callbacks run on several
+/// threads at once, each over its own closure and sharing only a lock (`TSan`). Escaping
+/// paths, a closure read while lent, and a callback sent to another thread are in
+/// `compile_fail/`. None of this reaches C, so Miri runs it.
+mod progress_callback {
+    use std::cell::Cell;
+    use std::ffi::{CStr, CString};
+    use std::panic::{self, AssertUnwindSafe};
+    use std::rc::Rc;
+    use std::sync::Mutex;
+    use std::thread;
+
+    use libgit2::libgit2::src::libgit2::checkout::ProgressCallback;
+
+    type Seen = Vec<(Option<CString>, usize, usize)>;
+
+    /// A type-erased progress closure.
+    type DynProgress<'a> = dyn FnMut(Option<&CStr>, usize, usize) + 'a;
+
+    fn record(seen: &mut Seen) -> impl FnMut(Option<&CStr>, usize, usize) + '_ {
+        |path, completed, total| seen.push((path.map(CStr::to_owned), completed, total))
+    }
+
+    #[test]
+    fn paths_from_every_source_are_lent_for_the_call() {
+        let mut seen = Seen::new();
+        let mut f = record(&mut seen);
+        let mut callback = ProgressCallback::new(&mut f);
+        callback.call(None, 0, 4);
+        // A heap string of exactly its length, freed right after the call.
+        let owned = CString::new("dir/a.txt").unwrap();
+        callback.call(Some(&owned), 1, 4);
+        drop(owned);
+        // A string inside a larger buffer, and a static one.
+        let buffer = b"x/b.txt\0trailing".to_vec();
+        callback.call(Some(CStr::from_bytes_until_nul(&buffer).unwrap()), 2, 4);
+        drop(buffer);
+        callback.call(Some(c""), 3, 4);
+        callback.call(Some(c"\xff\xfe"), 4, 4);
+        drop(callback);
+        drop(f);
+        assert_eq!(seen.len(), 5);
+        assert_eq!(seen[1].0.as_deref(), Some(c"dir/a.txt"));
+        assert_eq!(seen[2].0.as_deref(), Some(c"x/b.txt"));
+        assert_eq!(seen[4], (Some(c"\xff\xfe".to_owned()), 4, 4));
+    }
+
+    #[test]
+    fn every_closure_holder() {
+        fn plain(_: Option<&CStr>, completed: usize, total: usize) {
+            assert!(completed <= total);
+        }
+        let mut item = plain;
+        ProgressCallback::new(&mut item).call(None, 0, 1);
+
+        let mut count = 0;
+        let mut boxed: Box<DynProgress<'_>> = Box::new(|_, _, _| count += 1);
+        let mut callback = ProgressCallback::new(&mut boxed);
+        callback.call(None, 0, 2);
+        callback.call(Some(c"a"), 1, 2);
+        drop(callback);
+        drop(boxed);
+        assert_eq!(count, 2);
+
+        // A closure owning its state, lent to the callback and called again after it.
+        let len = Rc::new(Cell::new(0));
+        let mut owned = {
+            let len = Rc::clone(&len);
+            let mut paths = Vec::new();
+            move |path: Option<&CStr>, _, _| {
+                paths.extend(path.map(CStr::to_owned));
+                len.set(paths.len());
+            }
+        };
+        let mut callback = ProgressCallback::new(&mut owned);
+        callback.call(Some(c"one"), 1, 1);
+        drop(callback);
+        owned(Some(c"two"), 2, 2);
+        drop(owned);
+        assert_eq!((len.get(), Rc::strong_count(&len)), (2, 1));
+    }
+
+    #[test]
+    fn a_closure_calls_another_callback_reentrantly() {
+        let mut inner_seen = Seen::new();
+        let mut outer_calls = 0;
+        {
+            let mut inner = record(&mut inner_seen);
+            let mut outer = |path: Option<&CStr>, completed: usize, total: usize| {
+                outer_calls += 1;
+                // A callback within a callback, over the outer call's lent path.
+                let mut nested = ProgressCallback::new(&mut inner);
+                nested.call(path, completed * 10, total * 10);
+            };
+            let mut callback = ProgressCallback::new(&mut outer);
+            callback.call(None, 0, 1);
+            let path = CString::new("nested").unwrap();
+            callback.call(Some(&path), 1, 1);
+        }
+        assert_eq!(outer_calls, 2);
+        assert_eq!(
+            inner_seen,
+            [(None, 0, 10), (Some(c"nested".to_owned()), 10, 10)]
+        );
+    }
+
+    #[test]
+    fn a_panic_resumes_from_call_and_the_callback_runs_again() {
+        let mut calls = Vec::new();
+        let mut f = |path: Option<&CStr>, completed: usize, _: usize| {
+            calls.push(completed);
+            assert_ne!(completed, 1, "at {:?}", path.map(CStr::to_owned));
+        };
+        let mut callback = ProgressCallback::new(&mut f);
+        callback.call(None, 0, 2);
+        let path = CString::new("p").unwrap();
+        let caught = panic::catch_unwind(AssertUnwindSafe(|| callback.call(Some(&path), 1, 2)));
+        drop(path);
+        // The closure's own panic payload, its message included, comes back unchanged.
+        let message = caught.unwrap_err().downcast::<String>().unwrap();
+        assert!(message.contains("at Some(\"p\")"), "{message}");
+        assert_eq!(
+            format!("{callback:?}"),
+            "ProgressCallback { panicked: false, .. }"
+        );
+        callback.call(None, 2, 2);
+        drop(callback);
+        assert_eq!(calls, [0, 1, 2]);
+    }
+
+    #[test]
+    fn callbacks_on_threads_share_only_a_lock() {
+        let shared = Mutex::new(Vec::new());
+        thread::scope(|s| {
+            for t in 0..4_usize {
+                let shared = &shared;
+                s.spawn(move || {
+                    let mut local = 0;
+                    let mut f = |path: Option<&CStr>, completed: usize, _: usize| {
+                        local += completed;
+                        let path = path.map(CStr::to_owned);
+                        shared.lock().unwrap().push((t, path, completed));
+                    };
+                    let mut callback = ProgressCallback::new(&mut f);
+                    for step in 0..50 {
+                        let path = CString::new(format!("t{t}/{step}")).unwrap();
+                        callback.call(Some(&path), step, 50);
+                    }
+                    drop(callback);
+                    assert_eq!(local, (0..50).sum::<usize>());
+                });
+            }
+        });
+        let shared = shared.into_inner().unwrap();
+        assert_eq!(shared.len(), 200);
+        assert!(
+            shared
+                .iter()
+                .all(|(t, p, c)| p.as_deref().unwrap().to_str().unwrap() == format!("t{t}/{c}"))
+        );
+    }
+}

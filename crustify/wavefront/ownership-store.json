@@ -5467,6 +5467,44 @@
    ]
   },
   {
+   "name": "git_checkout_progress_cb",
+   "defined_in": null,
+   "ptr_args": [
+    {
+     "name": "arg0",
+     "ptr": {
+      "scalar": null,
+      "array": null,
+      "string": true,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "arg:arg0"
+      },
+      "nullable": true,
+      "mutable": false,
+      "note": "path: lent for the call only and only read. report_progress, the sole invoker, passes NULL once, for the zero baseline git_checkout_iterator reports before the first step (and on a checkout with nothing to do), and otherwise a path relative to the working directory owned by the checkout for its duration: a diff delta's old_file.path or new_file.path (removals, blob and symlink writes, submodules), an entry of data->removes, or a conflict side's index entry path. Bound as checkout::ProgressCallback, whose trampoline lends it to the closure as an Option<&CStr> that cannot outlive the call."
+     }
+    },
+    {
+     "name": "arg3",
+     "ptr": {
+      "scalar": {
+       "by_val": true
+      },
+      "array": null,
+      "string": false,
+      "owned": false,
+      "borrowed": {
+       "lifetime": "other"
+      },
+      "nullable": true,
+      "mutable": true,
+      "note": "payload: git_checkout_options.progress_payload, passed through unchanged on every call; libgit2 neither reads nor frees it. It must stay valid while a routine given the options may call back (git_checkout_head/index/tree, and through them reset, stash, merge, cherry-pick, revert, clone, submodule update, worktree add; a rebase keeps the options copy across git_rebase_next/finish). May be NULL; the callback may write through it. ProgressCallback passes itself, exclusively borrowed for the duration of the routine that drives the calls."
+     }
+    }
+   ]
+  },
+  {
    "name": "git_commit_amend",
    "defined_in": "src/libgit2/commit.c",
    "ptr_args": [

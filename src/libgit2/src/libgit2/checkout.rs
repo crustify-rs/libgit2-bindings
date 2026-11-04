@@ -44,12 +44,26 @@
 //! held in its own state and lent to the callback for the call. Rust reads them through a
 //! [`CheckoutPerfdataRef`], and holds a copy, or a value of its own, as a
 //! [`CheckoutPerfdata`].
+//!
+//! # Progress callbacks
+//!
+//! A [`ProgressCallback`] is a `git_checkout_progress_cb` over a Rust closure. A checkout
+//! calls one synchronously, on its own thread, while it runs: once to report how many
+//! steps it will take, then once per file it removes or writes and per conflict it
+//! resolves, lending it the path for the call alone. The callback returns nothing, so it
+//! observes the checkout without steering it. The wrappers of the routines that check out
+//! store its trampoline and itself in the options they hand to C, for the call only, and
+//! resume a panic its closure raised once C has returned; the options' own
+//! [`set_progress_callback`](CheckoutOptionsMut::set_progress_callback) stays a raw seam
+//! for C callbacks.
 
-use core::ffi::{CStr, c_int, c_void};
+use core::any::Any;
+use core::ffi::{CStr, c_char, c_int, c_void};
 use core::fmt;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::ptr::{self};
+use std::panic::{self, AssertUnwindSafe};
 
 use ffibox::{CBorrowedPtr, CCell, CMutSeam, CRefSeam, CZeroable, define_ctype};
 
@@ -345,8 +359,9 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
 
     /// The progress callback and its payload; `None` and NULL by default.
     ///
-    /// Raw seam: the callback is `git_checkout_progress_cb`, which this crate does not
-    /// wrap yet.
+    /// Raw seam: the fields hold whatever C callback and payload were stored. The safe
+    /// form of the callback is a [`ProgressCallback`], which the wrappers of the checkout
+    /// routines hand to libgit2 for the call.
     ///
     /// Wraps `fld::git_checkout_options.progress_cb`
     /// Wraps `fld::git_checkout_options.progress_payload`
@@ -697,8 +712,9 @@ impl<'o> CheckoutOptionsMut<'_, 'o> {
     /// Sets the progress callback and the payload it is passed; `None` calls nothing.
     /// libgit2 reports each file it writes or removes, and the total.
     ///
-    /// Raw seam: the callback is `git_checkout_progress_cb`, which this crate does not
-    /// wrap yet.
+    /// Raw seam: stores a C callback and payload as given. The safe form of the callback
+    /// is a [`ProgressCallback`], which the wrappers of the checkout routines hand to
+    /// libgit2 for the call, with its panics contained.
     ///
     /// # Safety
     ///
@@ -1113,9 +1129,139 @@ const _: () = assert!(
         && align_of::<CheckoutPerfdata>() == align_of::<ffi::git_checkout_perfdata>()
 );
 
+/// The closure behind a [`ProgressCallback`].
+type ProgressFn<'f> = dyn FnMut(Option<&CStr>, usize, usize) + 'f;
+
+/// A `git_checkout_progress_cb`: the callback a checkout calls as it goes, with the path
+/// it has just written or removed, the steps it has completed and the steps it will take.
+///
+/// Built over a closure with [`new`](Self::new). libgit2 calls it synchronously, on the
+/// thread running the checkout: once before the first step, with no path and no completed
+/// step, to report the total, then once after each file it removes, writes or resolves a
+/// conflict of, with that path, relative to the working directory, and the count so far.
+/// The path is lent for the call only (it is the diff's or the checkout's own string), so
+/// the closure receives it as a `&CStr` that cannot outlive the call. A dry run, or a
+/// checkout that stops before it writes anything, never calls it.
+///
+/// The callback returns nothing, so it cannot cancel the checkout. A panic in the closure
+/// does not cross into C: the checkout goes on, every later call it makes returns without
+/// running the closure, and the panic resumes once control is back in Rust, from
+/// [`call`](Self::call) or from the wrapper that ran the checkout.
+///
+/// ```
+/// use std::ffi::CStr;
+///
+/// use libgit2::libgit2::src::libgit2::checkout::ProgressCallback;
+///
+/// let mut seen = Vec::new();
+/// let mut record = |path: Option<&CStr>, completed: usize, total: usize| {
+///     seen.push((path.map(CStr::to_owned), completed, total));
+/// };
+/// let mut callback = ProgressCallback::new(&mut record);
+/// callback.call(None, 0, 2);
+/// callback.call(Some(c"a.txt"), 1, 2);
+/// callback.call(Some(c"dir/b.txt"), 2, 2);
+/// drop(callback);
+/// assert_eq!(seen[0], (None, 0, 2));
+/// assert_eq!(seen[2], (Some(c"dir/b.txt".to_owned()), 2, 2));
+/// ```
+///
+/// Wraps `ty::git_checkout_progress_cb`
+#[doc(alias = "git_checkout_progress_cb")]
+pub struct ProgressCallback<'f> {
+    f: &'f mut ProgressFn<'f>,
+    /// A panic the closure raised inside C, resumed once control is back in Rust.
+    panic: Option<Box<dyn Any + Send + 'static>>,
+}
+
+impl<'f> ProgressCallback<'f> {
+    /// The callback that calls `f` with each path and step count.
+    pub fn new<F>(f: &'f mut F) -> Self
+    where
+        F: FnMut(Option<&CStr>, usize, usize) + 'f,
+    {
+        Self { f, panic: None }
+    }
+
+    /// Calls the callback with `path`, `completed` and `total`, through the trampoline
+    /// libgit2 calls. A panic of the closure resumes here.
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "cannot panic but by resuming the closure's panic: the trampoline is never NULL"
+    )]
+    pub fn call(&mut self, path: Option<&CStr>, completed: usize, total: usize) {
+        self.walk_with(|callback, payload| {
+            let callback = callback.expect("the trampoline is never NULL");
+            let path = path.map_or(ptr::null(), CStr::as_ptr);
+            // SAFETY: `payload` is this callback, which nothing else uses during the call;
+            // `path` NULL or a NUL-terminated string borrowed for the call: the
+            // trampoline's contract.
+            unsafe { callback(path, completed, total, payload) }
+        });
+    }
+
+    /// Runs `walk` with the C callback and its payload, as the wrapper of a routine that
+    /// checks out (`git_checkout_head`, `git_checkout_index`, `git_checkout_tree`, and the
+    /// routines that check out through them) stores them in the options it hands to C,
+    /// then resumes a panic the closure raised meanwhile. The payload is this callback,
+    /// which nothing else touches until `walk` returns; libgit2 must be done calling it by
+    /// then.
+    ///
+    /// A walk that unwinds itself, rather than returning, leaves a panic of the closure
+    /// behind; it belonged to that walk, so it is dropped here, before the walk it would
+    /// otherwise skip the closure in and resume from.
+    pub(crate) fn walk_with<R>(
+        &mut self,
+        walk: impl FnOnce(ffi::git_checkout_progress_cb, *mut c_void) -> R,
+    ) -> R {
+        self.panic = None;
+        let result = walk(Some(progress_with), ptr::from_mut(self).cast());
+        if let Some(panic) = self.panic.take() {
+            panic::resume_unwind(panic);
+        }
+        result
+    }
+}
+
+impl fmt::Debug for ProgressCallback<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ProgressCallback")
+            .field("panicked", &self.panic.is_some())
+            .finish_non_exhaustive()
+    }
+}
+
+/// `git_checkout_progress_cb` over a [`ProgressCallback`]'s closure.
+///
+/// # Safety
+///
+/// `payload` must address a live [`ProgressCallback`] that nothing else uses during the
+/// call, and `path` be NULL or a NUL-terminated string live and unchanged for the call.
+unsafe extern "C" fn progress_with(
+    path: *const c_char,
+    completed_steps: usize,
+    total_steps: usize,
+    payload: *mut c_void,
+) {
+    // SAFETY: per this function's contract, `payload` is a live callback borrowed for the
+    // call alone.
+    let callback = unsafe { &mut *payload.cast::<ProgressCallback<'_>>() };
+    if callback.panic.is_some() {
+        return;
+    }
+    // SAFETY: per this function's contract, a non-NULL `path` is a NUL-terminated string
+    // live and unchanged for the call; the borrow ends with it, since the closure is
+    // generic over the string's lifetime.
+    let path = (!path.is_null()).then(|| unsafe { CStr::from_ptr(path) });
+    if let Err(panic) = panic::catch_unwind(AssertUnwindSafe(|| {
+        (callback.f)(path, completed_steps, total_steps);
+    })) {
+        callback.panic = Some(panic);
+    }
+}
+
 #[cfg(test)]
 mod unit_tests {
-    use core::ffi::c_char;
     use std::ffi::CString;
 
     use super::*;
@@ -1607,5 +1753,307 @@ mod unit_tests {
             .join()
             .unwrap();
         assert_eq!(moved, 3);
+    }
+
+    /// The progress callback's tests.
+    mod progress_callback {
+        use std::path::PathBuf;
+        use std::sync::OnceLock;
+        use std::{fs, process};
+
+        use super::*;
+
+        /// `GIT_CHECKOUT_FORCE`, from `git2/checkout.h`: the `-sys` crate does not bind the
+        /// strategy enum.
+        const FORCE: u32 = 1 << 1;
+
+        /// What a closure saw: the path (owned) and the two counts of each call.
+        type Seen = Vec<(Option<CString>, usize, usize)>;
+
+        /// A repository under a scratch directory, its working directory holding `files`,
+        /// all staged in its index; released on drop.
+        struct Staged {
+            dir: PathBuf,
+            repo: *mut ffi::git_repository,
+            index: *mut ffi::git_index,
+        }
+
+        impl Staged {
+            fn new(tag: &str, files: &[(&str, &str)]) -> Self {
+                // libgit2 marks a filter initialised on its first load outside the registry
+                // lock (`filter_initialize`), so concurrent first loads race (TSan): the
+                // first fixture, whose staging loads the filters, is built alone.
+                static PRIMED: OnceLock<()> = OnceLock::new();
+                PRIMED.get_or_init(|| drop(Self::build("prime", FILES)));
+                Self::build(tag, files)
+            }
+
+            fn build(tag: &str, files: &[(&str, &str)]) -> Self {
+                // SAFETY: initialising libgit2 has no precondition; the reference is kept.
+                assert!(unsafe { ffi::git_libgit2_init() } >= 1);
+                let dir = std::env::temp_dir()
+                    .join(format!("crustify-checkout-unit-{tag}-{}", process::id()));
+                drop(fs::remove_dir_all(&dir));
+                let work = dir.join("work");
+                let c_work = CString::new(work.to_str().unwrap()).unwrap();
+                let mut repo = ptr::null_mut();
+                // SAFETY: a writable slot and a NUL-terminated path, read for the call; the
+                // result is a repository this fixture owns.
+                let rc = unsafe { ffi::git_repository_init(&raw mut repo, c_work.as_ptr(), 0) };
+                assert_eq!(rc, 0);
+                let mut index = ptr::null_mut();
+                // SAFETY: a writable slot and the live repository; the result is one more
+                // counted reference to its index, which this fixture releases.
+                let rc = unsafe { ffi::git_repository_index(&raw mut index, repo) };
+                assert_eq!(rc, 0);
+                for (path, content) in files {
+                    let file = work.join(path);
+                    fs::create_dir_all(file.parent().unwrap()).unwrap();
+                    fs::write(file, content).unwrap();
+                    let path = CString::new(*path).unwrap();
+                    // SAFETY: the live index, and a NUL-terminated path it copies.
+                    let rc = unsafe { ffi::git_index_add_bypath(index, path.as_ptr()) };
+                    assert_eq!(rc, 0);
+                }
+                Self { dir, repo, index }
+            }
+
+            /// Checks the index out into `target`, forced, with the callback `walk_with`
+            /// lends, and returns libgit2's code.
+            fn checkout(&self, target: &CStr, callback: &mut ProgressCallback<'_>) -> c_int {
+                let mut options = CheckoutOptions::new();
+                options.as_mut().set_strategy(FORCE);
+                options.as_mut().set_target_directory(Some(target));
+                callback.walk_with(|cb, payload| {
+                    // SAFETY: the trampoline is sound for any arguments libgit2 passes, and
+                    // `payload` stays valid until the walk returns, after the checkout,
+                    // which is the options' only use.
+                    unsafe { options.as_mut().set_progress_callback(cb, payload) };
+                    // SAFETY: the live repository and index; live options, whose pointers
+                    // are live or NULL, read for the call.
+                    unsafe {
+                        ffi::git_checkout_index(self.repo, self.index, options.as_ref().as_ptr())
+                    }
+                })
+            }
+
+            fn target(&self, name: &str) -> (PathBuf, CString) {
+                let path = self.dir.join(name);
+                let c = CString::new(path.to_str().unwrap()).unwrap();
+                (path, c)
+            }
+        }
+
+        impl Drop for Staged {
+            fn drop(&mut self) {
+                // SAFETY: the index reference `new` took, released once.
+                unsafe { ffi::git_index_free(self.index) };
+                // SAFETY: the repository `new` opened, freed once, after its index.
+                unsafe { ffi::git_repository_free(self.repo) };
+                drop(fs::remove_dir_all(&self.dir));
+            }
+        }
+
+        const FILES: &[(&str, &str)] = &[
+            ("a.txt", "one\n"),
+            ("dir/b.txt", "two\n"),
+            ("dir/sub/c.txt", "three\n"),
+        ];
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls C")]
+        fn libgit2_reports_the_total_then_every_file() {
+            let staged = Staged::new("report", FILES);
+            let (path, target) = staged.target("out");
+            let mut seen = Seen::new();
+            let mut record = |path: Option<&CStr>, completed, total| {
+                seen.push((path.map(CStr::to_owned), completed, total));
+            };
+            let mut callback = ProgressCallback::new(&mut record);
+            assert_eq!(staged.checkout(&target, &mut callback), 0);
+            drop(callback);
+            assert_eq!(
+                seen,
+                [
+                    (None, 0, 3),
+                    (Some(c"a.txt".to_owned()), 1, 3),
+                    (Some(c"dir/b.txt".to_owned()), 2, 3),
+                    (Some(c"dir/sub/c.txt".to_owned()), 3, 3),
+                ]
+            );
+            assert_eq!(fs::read(path.join("dir/sub/c.txt")).unwrap(), b"three\n");
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls C")]
+        fn a_panic_lets_the_checkout_finish_then_resumes() {
+            let staged = Staged::new("panic", FILES);
+            let (path, target) = staged.target("out");
+            let mut calls = 0;
+            let mut boom = |_: Option<&CStr>, completed, _| {
+                calls += 1;
+                assert!(completed < 1, "boom");
+            };
+            let mut callback = ProgressCallback::new(&mut boom);
+            let caught =
+                panic::catch_unwind(AssertUnwindSafe(|| staged.checkout(&target, &mut callback)));
+            assert_eq!(*caught.unwrap_err().downcast::<&str>().unwrap(), "boom");
+            assert!(format!("{callback:?}").contains("panicked: false"));
+            drop(callback);
+            // The baseline call and the one that panicked; the later two skip the closure.
+            assert_eq!(calls, 2);
+            // The callback cannot cancel: every file is written all the same.
+            for (file, content) in FILES {
+                assert_eq!(fs::read(path.join(file)).unwrap(), content.as_bytes());
+            }
+
+            // The same callback serves a later checkout, its earlier panic forgotten.
+            let (_, again) = staged.target("again");
+            let mut count = 0;
+            let mut counting = |_: Option<&CStr>, _, _| count += 1;
+            let mut callback = ProgressCallback::new(&mut counting);
+            assert_eq!(staged.checkout(&again, &mut callback), 0);
+            drop(callback);
+            assert_eq!(count, 4);
+        }
+
+        #[test]
+        #[cfg_attr(miri, ignore = "calls C")]
+        fn a_dry_run_never_calls_back() {
+            const DRY_RUN: u32 = 1 << 24;
+            let staged = Staged::new("dry", FILES);
+            let (_, target) = staged.target("out");
+            let mut calls = 0;
+            let mut count = |_: Option<&CStr>, _, _| calls += 1;
+            let mut callback = ProgressCallback::new(&mut count);
+            let mut options = CheckoutOptions::new();
+            options.as_mut().set_strategy(FORCE | DRY_RUN);
+            options.as_mut().set_target_directory(Some(&target));
+            let rc = callback.walk_with(|cb, payload| {
+                // SAFETY: as in `Staged::checkout`.
+                unsafe { options.as_mut().set_progress_callback(cb, payload) };
+                // SAFETY: as in `Staged::checkout`.
+                unsafe {
+                    ffi::git_checkout_index(staged.repo, staged.index, options.as_ref().as_ptr())
+                }
+            });
+            drop(callback);
+            assert_eq!((rc, calls), (0, 0));
+        }
+
+        #[test]
+        fn call_lends_the_path_and_the_counts() {
+            let mut seen = Seen::new();
+            let mut record = |path: Option<&CStr>, completed, total| {
+                seen.push((path.map(CStr::to_owned), completed, total));
+            };
+            let mut callback = ProgressCallback::new(&mut record);
+            callback.call(None, 0, usize::MAX);
+            let owned = CString::new("dir/é.txt").unwrap();
+            callback.call(Some(&owned), usize::MAX, usize::MAX);
+            callback.call(Some(c""), 7, 3);
+            assert_eq!(
+                format!("{callback:?}"),
+                "ProgressCallback { panicked: false, .. }"
+            );
+            drop(callback);
+            assert_eq!(
+                seen,
+                [
+                    (None, 0, usize::MAX),
+                    (Some(owned), usize::MAX, usize::MAX),
+                    (Some(c"".to_owned()), 7, 3),
+                ]
+            );
+        }
+
+        #[test]
+        fn the_trampoline_reads_a_null_path_as_none() {
+            let mut seen = Vec::new();
+            let mut record = |path: Option<&CStr>, completed, total| {
+                seen.push((path.is_none(), completed, total));
+            };
+            let mut callback = ProgressCallback::new(&mut record);
+            callback.walk_with(|cb, payload| {
+                let cb = cb.unwrap();
+                // SAFETY: `payload` is the callback `walk_with` lends; NULL is in the
+                // trampoline's contract.
+                unsafe { cb(ptr::null(), 0, 2, payload) };
+                // SAFETY: as above, with a string live for the call.
+                unsafe { cb(c"x".as_ptr(), 1, 2, payload) };
+            });
+            drop(callback);
+            assert_eq!(seen, [(true, 0, 2), (false, 1, 2)]);
+        }
+
+        #[test]
+        fn a_panic_skips_later_calls_of_the_walk_then_resumes() {
+            let mut calls = 0;
+            let mut boom = |_: Option<&CStr>, _, _| {
+                calls += 1;
+                panic!("boom");
+            };
+            let mut callback = ProgressCallback::new(&mut boom);
+            let mut after = false;
+            let caught = panic::catch_unwind(AssertUnwindSafe(|| {
+                callback.walk_with(|cb, payload| {
+                    let cb = cb.unwrap();
+                    for step in 0..3 {
+                        // SAFETY: `payload` is the callback `walk_with` lends.
+                        unsafe { cb(ptr::null(), step, 3, payload) };
+                    }
+                    // Control comes back to the walk, which runs to its end.
+                    after = true;
+                });
+            }));
+            assert_eq!(*caught.unwrap_err().downcast::<&str>().unwrap(), "boom");
+            assert!(after);
+            assert!(format!("{callback:?}").contains("panicked: false"));
+            drop(callback);
+            assert_eq!(calls, 1);
+        }
+
+        #[test]
+        fn call_resumes_a_panic_and_the_callback_runs_again() {
+            let mut calls = 0;
+            let mut f = |_: Option<&CStr>, completed: usize, _| {
+                calls += 1;
+                assert_ne!(completed, 1, "one");
+            };
+            let mut callback = ProgressCallback::new(&mut f);
+            callback.call(None, 0, 2);
+            let caught = panic::catch_unwind(AssertUnwindSafe(|| callback.call(None, 1, 2)));
+            assert!(caught.is_err());
+            callback.call(None, 2, 2);
+            drop(callback);
+            assert_eq!(calls, 3);
+        }
+
+        #[test]
+        fn a_walk_that_unwinds_leaves_no_stale_panic() {
+            let mut calls = 0;
+            let mut f = |_: Option<&CStr>, _, _| {
+                calls += 1;
+                assert!(calls > 1, "first call");
+            };
+            let mut callback = ProgressCallback::new(&mut f);
+            // The closure panics inside the walk, which then unwinds on its own before
+            // `walk_with` could resume the closure's panic.
+            let walked = panic::catch_unwind(AssertUnwindSafe(|| {
+                callback.walk_with(|cb, payload| {
+                    // SAFETY: `payload` is the callback `walk_with` lends.
+                    unsafe { cb.unwrap()(ptr::null(), 0, 1, payload) };
+                    panic!("the walk's own");
+                })
+            }));
+            assert_eq!(
+                *walked.unwrap_err().downcast::<&str>().unwrap(),
+                "the walk's own"
+            );
+            // The next walk runs the closure: the first walk's panic was dropped.
+            callback.call(None, 1, 1);
+            drop(callback);
+            assert_eq!(calls, 2);
+        }
     }
 }

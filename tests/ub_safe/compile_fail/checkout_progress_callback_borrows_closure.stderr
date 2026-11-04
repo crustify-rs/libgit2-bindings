@@ -1,0 +1,12 @@
+error[E0502]: cannot borrow `steps` as immutable because it is also borrowed as mutable
+  --> tests/ub_safe/compile_fail/checkout_progress_callback_borrows_closure.rs:12:16
+   |
+ 9 |     let mut f = |_: Option<&CStr>, completed: usize, _: usize| steps.push(completed);
+   |                 ---------------------------------------------- ----- first borrow occurs due to use of `steps` in closure
+   |                 |
+   |                 mutable borrow occurs here
+...
+12 |     assert_eq!(steps.len(), 1);
+   |                ^^^^^ immutable borrow occurs here
+13 |     callback.call(None, 1, 1);
+   |     -------- mutable borrow later used here

@@ -11,6 +11,12 @@
 //! performance callbacks. The checkout routines are not wrapped yet, so the Rust
 //! options reach `git_checkout_tree` / `git_checkout_index` through their documented
 //! `#[repr(transparent)]` layout, which [`c_ptr`] relies on.
+//!
+//! A [`ProgressCallback`] over a closure is then compared with a C progress callback the
+//! same way, each on its own fixture and over the same checkouts: both must see the same
+//! paths and counts, call for call. The Rust callback is reached through a C-ABI forwarder
+//! that hands each call to [`ProgressCallback::call`], since no wrapper of a checkout
+//! routine takes it yet.
 
 use std::cell::RefCell;
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
@@ -25,7 +31,7 @@ use ffibox::CRefSeam;
 use glibc_bindings::libc::ffi as libc;
 use libgit2::ffi;
 use libgit2::libgit2::src::libgit2::checkout::{
-    CheckoutOptions, CheckoutOptionsRef, CheckoutPerfdata, CheckoutPerfdataRef,
+    CheckoutOptions, CheckoutOptionsRef, CheckoutPerfdata, CheckoutPerfdataRef, ProgressCallback,
 };
 use libgit2::libgit2::src::libgit2::index::IndexArc;
 use libgit2::libgit2::src::libgit2::repository::{InitFlag, InitOptions, Repository};
@@ -1277,4 +1283,183 @@ fn perfdata_reads_match_c_after_every_checkout() {
     // Checkout never asks `git_futils_mkdir` to chmod (no `GIT_MKDIR_CHMOD*` flag).
     assert!(reads.c.iter().all(|c| c.2 == 0), "{reads:?}");
     assert_ne!(reads.copies[0], reads.copies[1], "{reads:?}");
+}
+
+/// Hands libgit2's progress arguments to the [`ProgressCallback`] at `payload`, through
+/// [`ProgressCallback::call`], which runs the trampoline libgit2 would call: no wrapper of a
+/// checkout routine takes the callback yet.
+extern "C" fn forward(path: *const c_char, completed: usize, total: usize, payload: *mut c_void) {
+    // SAFETY: the payload `compare_progress` installs is its callback, which nothing else
+    // uses while a checkout runs.
+    let callback = unsafe { &mut *payload.cast::<ProgressCallback<'_>>() };
+    // SAFETY: libgit2 passes NULL or a NUL-terminated string live for the call.
+    let path = (!path.is_null()).then(|| unsafe { CStr::from_ptr(path) });
+    callback.call(path, completed, total);
+}
+
+/// Runs `steps`, each with a progress callback, on two independent fixtures (`conflict`
+/// adds the index conflict to both): a C callback on a C struct, and a
+/// [`ProgressCallback`] over a closure on a [`CheckoutOptions`]. After every step, both
+/// checkouts must have done the same, and both callbacks seen the same calls.
+fn compare_progress(tag: &str, conflict: bool, steps: &[Step]) -> Vec<Outcome> {
+    let (cf, rf) = (
+        Fixture::new(&format!("{tag}-c")),
+        Fixture::new(&format!("{tag}-rust")),
+    );
+    if conflict {
+        cf.add_conflict();
+        rf.add_conflict();
+    }
+    let (clog, rlog) = (RefCell::new(Log::default()), RefCell::new(Log::default()));
+    let c_paths: Vec<Vec<*mut c_char>> = steps
+        .iter()
+        .map(|s| s.paths.iter().map(|p| p.as_ptr().cast_mut()).collect())
+        .collect();
+    let views: Vec<StrArrayView<'_>> = steps.iter().map(|s| StrArrayView::new(s.paths)).collect();
+    let mut record = |path: Option<&CStr>, completed: usize, total: usize| {
+        let path = path.map(|p| p.to_string_lossy().into_owned());
+        rlog.borrow_mut().progress.push((path, completed, total));
+    };
+    let mut callback = ProgressCallback::new(&mut record);
+    let payload = ptr::from_mut(&mut callback).cast::<c_void>();
+
+    let mut c = ffi::git_checkout_options::default();
+    // SAFETY: `c` is writable storage for the struct; version 1 is accepted.
+    let rc =
+        unsafe { ffi::git_checkout_options_init(&raw mut c, ffi::GIT_CHECKOUT_OPTIONS_VERSION) };
+    assert_eq!(rc, 0);
+    let mut rust = CheckoutOptions::new();
+    let mut outcomes = Vec::new();
+    for (i, step) in steps.iter().enumerate() {
+        let step = Step {
+            progress: true,
+            ..*step
+        };
+        step.apply_c(&mut c, &cf, &clog, &c_paths[i]);
+        step.apply_rust(&mut rust, &rf, &rlog, &views[i]);
+        // SAFETY: `forward` hands every call to the callback at `payload`, which outlives
+        // the options and which only the checkouts below use.
+        unsafe { rust.as_mut().set_progress_callback(Some(forward), payload) };
+        let expected = step.checkout(&cf, &clog, &raw const c);
+        let actual = step.checkout(&rf, &rlog, c_ptr(&rust));
+        assert_eq!(actual, expected, "checkout at step {i}: {step:?}");
+        outcomes.push(actual);
+    }
+    outcomes
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn a_progress_callback_sees_what_a_c_callback_sees() {
+    let forced = Step {
+        tree: 1,
+        strategy: FORCE,
+        ..Step::default()
+    };
+    let steps = [
+        // A safe checkout over the dirty working directory stops before writing.
+        Step {
+            tree: 1,
+            ..Step::default()
+        },
+        // Every file of tree 1 into a fresh target directory.
+        Step {
+            target: Some(0),
+            ..forced
+        },
+        // A pathspec restricts the steps reported.
+        Step {
+            target: Some(1),
+            paths: &[c"*.md", c"dir/*"],
+            ..forced
+        },
+        // A dry run reports nothing.
+        Step {
+            strategy: FORCE | GIT_CHECKOUT_DRY_RUN,
+            target: Some(2),
+            ..forced
+        },
+        // Into the working directory: an update and a new file.
+        Step { ..forced },
+        // Back to tree 0: an update and a removal.
+        Step {
+            tree: 0,
+            baseline: Baseline::Tree(1),
+            ..forced
+        },
+        // Nothing left to do: the baseline call alone.
+        Step {
+            tree: 0,
+            baseline: Baseline::Tree(0),
+            ..forced
+        },
+    ];
+    let outcomes = compare_progress("progress", false, &steps);
+    let progress = |i: usize| &outcomes[i].log.progress;
+    assert_ne!(outcomes[0].rc, 0);
+    assert!(progress(0).is_empty() && progress(3).is_empty());
+    let total = progress(1)[0].2;
+    assert_eq!(progress(1)[0], (None, 0, total));
+    assert_eq!(progress(1).len(), total + 1);
+    assert!(progress(2)[0].2 < total);
+    assert!(
+        progress(5)
+            .iter()
+            .any(|(p, ..)| p.as_deref() == Some("e.txt")),
+        "the removal is reported: {:?}",
+        progress(5)
+    );
+    assert_eq!(*progress(6), [(None, 0, 0)]);
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn a_progress_callback_sees_conflicts_as_a_c_callback() {
+    let forced = Step {
+        index: true,
+        strategy: FORCE,
+        ..Step::default()
+    };
+    let steps = [
+        Step {
+            strategy: FORCE | GIT_CHECKOUT_CONFLICT_STYLE_DIFF3,
+            target: Some(0),
+            ..forced
+        },
+        Step {
+            strategy: FORCE | GIT_CHECKOUT_USE_OURS,
+            target: Some(1),
+            ..forced
+        },
+        Step {
+            strategy: FORCE | GIT_CHECKOUT_SKIP_UNMERGED,
+            target: Some(2),
+            ..forced
+        },
+        Step {
+            strategy: GIT_CHECKOUT_ALLOW_CONFLICTS,
+            target: Some(3),
+            ..forced
+        },
+    ];
+    let outcomes = compare_progress("progress-conflict", true, &steps);
+    for outcome in &outcomes[..2] {
+        assert!(
+            outcome
+                .log
+                .progress
+                .iter()
+                .any(|(p, ..)| p.as_deref() == Some("f.txt")),
+            "the content conflict is a step: {:?}",
+            outcome.log.progress
+        );
+    }
+    assert!(
+        !outcomes[2]
+            .log
+            .progress
+            .iter()
+            .any(|(p, ..)| p.as_deref() == Some("f.txt")),
+        "a skipped conflict is not a step"
+    );
 }

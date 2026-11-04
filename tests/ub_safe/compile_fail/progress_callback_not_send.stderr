@@ -10,7 +10,7 @@ error[E0277]: `dyn for<'a> FnMut(IndexerProgressRef<'a>) -> ControlFlow<()>` can
    |
    = help: within `{closure@$DIR/tests/ub_safe/compile_fail/progress_callback_not_send.rs:12:17: 12:24}`, the trait `Send` is not implemented for `dyn for<'a> FnMut(IndexerProgressRef<'a>) -> ControlFlow<()>`
    = note: required because it appears within the type `&mut dyn for<'a> FnMut(IndexerProgressRef<'a>) -> ControlFlow<()>`
-note: required because it appears within the type `ProgressCallback<'_>`
+note: required because it appears within the type `libgit2::libgit2::src::libgit2::indexer::ProgressCallback<'_>`
   --> src/libgit2/src/libgit2/indexer.rs
    |
    | pub struct ProgressCallback<'f> {
