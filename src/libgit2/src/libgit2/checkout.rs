@@ -54,7 +54,8 @@
 //! A [`ProgressCallback`] is a `git_checkout_progress_cb` over a Rust closure. A checkout
 //! calls one synchronously, on its own thread, while it runs: once to report how many
 //! steps it will take, then once per file it removes or writes and per conflict it
-//! resolves, lending it the path for the call alone. The callback returns nothing, so it
+//! writes, lending it the path for the call alone. The conflicts it removes from the index
+//! are steps it counts but does not report. The callback returns nothing, so it
 //! observes the checkout without steering it. The wrappers of the routines that check out
 //! store its trampoline and itself in the options they hand to C, for the call only, and
 //! resume a panic its closure raised once C has returned; the options' own
@@ -1172,11 +1173,18 @@ type ProgressFn<'f> = dyn FnMut(Option<&CStr>, usize, usize) + 'f;
 ///
 /// Built over a closure with [`new`](Self::new). libgit2 calls it synchronously, on the
 /// thread running the checkout: once before the first step, with no path and no completed
-/// step, to report the total, then once after each file it removes, writes or resolves a
-/// conflict of, with that path, relative to the working directory, and the count so far.
+/// step, to report the total, then once after each file it removes or writes and each
+/// conflict it writes out, with that path, relative to the working directory, and the count
+/// so far.
 /// The path is lent for the call only (it is the diff's or the checkout's own string), so
 /// the closure receives it as a `&CStr` that cannot outlive the call. A dry run, or a
 /// checkout that stops before it writes anything, never calls it.
+///
+/// Not every step is reported. A checkout that removes stale conflicts from the index
+/// counts each removal as a step, in the total and in the completed count, but calls back
+/// for none of them: the removals come first, so the next call's count skips them, and a
+/// checkout that only removes conflicts calls back once, for the baseline. The last call
+/// therefore need not report every step completed.
 ///
 /// The callback returns nothing, so it cannot cancel the checkout. A panic in the closure
 /// does not cross into C: the checkout goes on, every later call it makes returns without

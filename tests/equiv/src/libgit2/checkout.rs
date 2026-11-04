@@ -1306,19 +1306,17 @@ extern "C" fn forward(path: *const c_char, completed: usize, total: usize, paylo
     callback.call(path, completed, total);
 }
 
-/// Runs `steps`, each with a progress callback, on two independent fixtures (`conflict`
-/// adds the index conflict to both): a C callback on a C struct, and a
-/// [`ProgressCallback`] over a closure on a [`CheckoutOptions`]. After every step, both
+/// Runs `steps`, each with a progress callback, on two independent fixtures, each first
+/// set up by `prepare` (such as [`Fixture::add_conflict`]): a C callback on a C struct, and
+/// a [`ProgressCallback`] over a closure on a [`CheckoutOptions`]. After every step, both
 /// checkouts must have done the same, and both callbacks seen the same calls.
-fn compare_progress(tag: &str, conflict: bool, steps: &[Step]) -> Vec<Outcome> {
-    let (cf, rf) = (
+fn compare_progress(tag: &str, prepare: fn(&mut Fixture), steps: &[Step]) -> Vec<Outcome> {
+    let (mut cf, mut rf) = (
         Fixture::new(&format!("{tag}-c")),
         Fixture::new(&format!("{tag}-rust")),
     );
-    if conflict {
-        cf.add_conflict();
-        rf.add_conflict();
-    }
+    prepare(&mut cf);
+    prepare(&mut rf);
     let (clog, rlog) = (RefCell::new(Log::default()), RefCell::new(Log::default()));
     let c_paths: Vec<Vec<*mut c_char>> = steps
         .iter()
@@ -1403,7 +1401,7 @@ fn a_progress_callback_sees_what_a_c_callback_sees() {
             ..forced
         },
     ];
-    let outcomes = compare_progress("progress", false, &steps);
+    let outcomes = compare_progress("progress", |_| {}, &steps);
     let progress = |i: usize| &outcomes[i].log.progress;
     assert_ne!(outcomes[0].rc, 0);
     assert!(progress(0).is_empty() && progress(3).is_empty());
@@ -1451,7 +1449,7 @@ fn a_progress_callback_sees_conflicts_as_a_c_callback() {
             ..forced
         },
     ];
-    let outcomes = compare_progress("progress-conflict", true, &steps);
+    let outcomes = compare_progress("progress-conflict", |f| f.add_conflict(), &steps);
     for outcome in &outcomes[..2] {
         assert!(
             outcome
@@ -1832,4 +1830,97 @@ fn perfdata_reads_match_c_on_links_update_only_and_a_failed_index_write() {
     assert!(reads.c.iter().all(|c| c.1 > 0 && c.2 == 0), "{reads:?}");
     // SAFETY: `link_tree` is the reference looked up above, used no more.
     unsafe { ffi::git_tree_free(link_tree) };
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn a_progress_callback_sees_removed_conflicts_as_a_c_callback() {
+    // A tree checkout over an index that holds conflicts removes them from the index:
+    // each removal is a step, counted in the total and the completed steps, yet libgit2
+    // reports none of them (`checkout_remove_conflicts`). With nothing else to do, the
+    // baseline is the only call, and the callback never sees the steps complete.
+    let only_removals = Step {
+        tree: 0,
+        strategy: FORCE,
+        baseline: Baseline::Tree(0),
+        ..Step::default()
+    };
+    let outcomes = compare_progress(
+        "progress-remove-conflict",
+        |f| f.add_conflict(),
+        &[only_removals],
+    );
+    assert_eq!(outcomes[0].rc, 0);
+    // Five conflicted paths: `f.txt`, `g`, `g/h`, `k` and `k/l`.
+    assert_eq!(outcomes[0].log.progress, [(None, 0, 5)]);
+
+    // Beside other steps, the removals come first, so the first path reported skips
+    // their counts.
+    let beside_updates = Step {
+        tree: 1,
+        strategy: FORCE,
+        baseline: Baseline::Tree(0),
+        ..Step::default()
+    };
+    let outcomes = compare_progress(
+        "progress-remove-conflict-update",
+        |f| f.add_conflict(),
+        &[beside_updates],
+    );
+    let progress = &outcomes[0].log.progress;
+    let total = progress[0].2;
+    assert_eq!(progress[0], (None, 0, total));
+    assert_eq!(progress[1].1, 6, "{progress:?}");
+    assert_eq!(progress.last().unwrap().1, total, "{progress:?}");
+    assert_eq!(progress.len(), total + 1 - 5, "{progress:?}");
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn a_progress_callback_sees_symlinks_and_submodules_as_a_c_callback() {
+    /// Replaces tree 1 by tree 1 plus a symlink and a submodule (a gitlink without a
+    /// `.gitmodules`, which checkout writes as an empty directory).
+    fn add_links(f: &mut Fixture) {
+        std::os::unix::fs::symlink("a.txt", f.work.join("link")).unwrap();
+        // SAFETY: the index is live and the path NUL-terminated, read for the call.
+        let rc = unsafe { ffi::git_index_add_bypath(f.index, c"link".as_ptr()) };
+        assert_eq!(rc, 0, "{:?}", c_last(&f.root));
+        let gitlink = ffi::git_index_entry {
+            mode: 0o160_000,
+            // A SHA-1 id (`GIT_OID_SHA1`), whose commit need not exist.
+            id: ffi::git_oid {
+                type_: 1,
+                id: core::array::from_fn(|i| if i < 20 { 0x5A } else { 0 }),
+            },
+            path: c"sub".as_ptr(),
+            ..Default::default()
+        };
+        // SAFETY: the index is live and the entry read for the call; it copies the path.
+        let rc = unsafe { ffi::git_index_add(f.index, &raw const gitlink) };
+        assert_eq!(rc, 0, "{:?}", c_last(&f.root));
+        let mut id = ffi::git_oid::default();
+        // SAFETY: `id` is a live out-parameter and the index is live.
+        let rc = unsafe { ffi::git_index_write_tree(&raw mut id, f.index) };
+        assert_eq!(rc, 0);
+        let mut tree = ptr::null_mut();
+        // SAFETY: `tree` is a live slot; the result is a new reference the fixture owns.
+        let rc = unsafe { ffi::git_tree_lookup(&raw mut tree, f.repo, &raw const id) };
+        assert_eq!(rc, 0);
+        // SAFETY: the fixture's own reference to the tree it replaces, released once; the
+        // Rust side's owner holds a reference of its own.
+        unsafe { ffi::git_tree_free(f.trees[1]) };
+        f.trees[1] = tree;
+    }
+    let steps = [Step {
+        tree: 1,
+        strategy: FORCE,
+        target: Some(0),
+        ..Step::default()
+    }];
+    let outcomes = compare_progress("progress-links", add_links, &steps);
+    let progress = &outcomes[0].log.progress;
+    // Blobs first, then symlinks, then submodules, each a step of its own.
+    assert_eq!(progress.len(), 7, "{progress:?}");
+    assert_eq!(progress[5], (Some("link".to_owned()), 5, 6));
+    assert_eq!(progress[6], (Some("sub".to_owned()), 6, 6));
 }
