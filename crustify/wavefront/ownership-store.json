@@ -11001,7 +11001,7 @@
       },
       "nullable": true,
       "mutable": false,
-      "note": "Nullable default options. Generator copies struct; pathspec/prefix contents are copied into pool but copied raw options include callbacks/payload and borrowed pointers. Wrapper conservatively requires nested referents outlive result. Parse options only read scalar version/oid_type during call."
+      "note": "Nullable git_diff_parse_options: NULL, or oid_type 0, selects GIT_OID_DEFAULT (SHA-1). Read once, during the call: only oid_type is read (diff_parse.c:90-91), version is never read and not checked, and nothing is retained. The struct holds two scalars and no pointer. oid_type is not validated: a value git_oid_t does not name sizes ids as 0 (git_oid_hexsize), so a safe wrapper passes only 0 or a named type."
      }
     },
     {

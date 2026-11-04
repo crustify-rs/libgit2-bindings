@@ -41,14 +41,14 @@ impl Diff<'static> {
         constructed(rc, unsafe { DiffBox::from_c(out) })
     }
 
-    /// Parse with an explicit object-id type.
+    /// Parse with an explicit object-id type: [`from_buffer_with_options`] with
+    /// [`DiffParseOptions::with_oid_type`].
     ///
     /// # Errors
     ///
     /// Fails as [`from_buffer`](Self::from_buffer) does.
     ///
-    /// Wraps `fn::git_diff_from_buffer_ext`
-    #[doc(alias = "git_diff_from_buffer_ext")]
+    /// [`from_buffer_with_options`]: Self::from_buffer_with_options
     pub fn from_buffer_with_oid_type(
         content: &[u8],
         kind: OidType,
@@ -63,6 +63,9 @@ impl Diff<'static> {
     /// # Errors
     ///
     /// Fails as [`from_buffer`](Self::from_buffer) does.
+    ///
+    /// Wraps `fn::git_diff_from_buffer_ext`
+    #[doc(alias = "git_diff_from_buffer_ext")]
     pub fn from_buffer_with_options(
         content: &[u8],
         opts: DiffParseOptions,

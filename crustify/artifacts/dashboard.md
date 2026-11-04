@@ -234,8 +234,9 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/src/libgit2/indexer.c` | `173` | `0` | review | `1` | `7` | `+10/-7` | — | `$3.93` | `10.78M` | `16m22s` | `$3.93` | `$0.56` |
 | `libgit2/src/libgit2/odb.c` | `177` | `0` | review | `4` | `19` | `+64/-8` | — | `$1.37` | `4.35M` | `28m33s` | `$0.34` | `$0.07` |
 | `libgit2/src/libgit2/odb.c` | `181` | `0` | review | `1` | `16` | `+39/-14` | — | `$7.12` | `20.62M` | `23m15s` | `$7.12` | `$0.45` |
+| `libgit2/src/libgit2/diff_parse.c` | `229` | `0` | review | `1` | `2` | `+6/-3` | — | — | — | — | — | — |
 | **Σ first** |  |  |  | **`103`** | **`189`** | **`+95617/-2089`** | **`45.85`% / `99.54`%** | **`$565.88`** | **`1368.98M`** | — | **`$5.49`** | **`$2.99`** |
-| **Σ review** |  |  |  | **`102`** | **`187`** | **`+9377/-2060`** | **`46.57`% / `99.53`%** | **`$401.46`** | **`648.60M`** | — | **`$3.94`** | **`$2.15`** |
+| **Σ review** |  |  |  | **`103`** | **`189`** | **`+9383/-2063`** | **`46.57`% / `99.53`%** | **`$401.46`** | **`648.60M`** | — | **`$3.94`** | **`$2.15`** |
 
 ### Batches — wrap: tests
 
@@ -330,6 +331,7 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/src/libgit2/indexer.c` | `173` | `0` | review | `+0` (—/— pp) | `+0` (—/— pp) | `+0` (—/— pp) | `+0` (—/— pp) |
 | `libgit2/src/libgit2/odb.c` | `177` | `0` | review | `+1` (—/— pp) | `+0` (—/— pp) | `+0` (—/— pp) | `+0` (—/— pp) |
 | `libgit2/src/libgit2/odb.c` | `181` | `0` | review | `+0` (—/— pp) | `+0` (—/— pp) | `+0` (—/— pp) | `+0` (—/— pp) |
+| `libgit2/src/libgit2/diff_parse.c` | `229` | `0` | review | `+0` (—/— pp) | `+0` (—/— pp) | `+0` (—/— pp) | `+0` (—/— pp) |
 | **Σ first** |  |  |  | **`+451` (`+24.85`/`-2.70` pp)** | **`+55` (`+16.78`/`-52.20` pp)** | **`+256` (`+31.12`/`-24.83` pp)** | **`+467` (`+12.61`/`+24.41` pp)** |
 | **Σ review** |  |  |  | **`+35` (`+0.37`/`+2.20` pp)** | **`+3` (`-0.40`/`-5.36` pp)** | **`+22` (`+2.71`/`-1.21` pp)** | **`+39` (`+4.66`/`+2.36` pp)** |
 
@@ -446,6 +448,7 @@ Deterministic `ffimap`; no model.
 | `libgit2/src/libgit2/indexer.c` | `173` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `+0` | `+0` | — | `+0` | `+0` |
 | `libgit2/src/libgit2/odb.c` | `177` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `-0.00` pp | `+0` | `+0` | — | `+0` | `+0` |
 | `libgit2/src/libgit2/odb.c` | `181` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `+0` | `+0` | — | `+0` | `+0` |
+| `libgit2/src/libgit2/diff_parse.c` | `229` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `+0` | `+0` | — | `+0` | `+0` |
 | **Σ first** |  |  |  |  | **`+4`** | **`+9`** | **`+8`** | **`+16`** | — | — | **`-0.52` pp** | **`+1118`** | — | — | **`+7`** | **`+7`** |
 | **Σ review** |  |  |  |  | **`+0`** | **`+0`** | **`+0`** | **`-3`** | — | — | **`-0.14` pp** | **`+20`** | — | — | **`+0`** | **`-2`** |
 
@@ -478,7 +481,8 @@ Deterministic `ffimap`; no model.
 | `libgit2/src/libgit2/indexer.c` | `173` | `0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+2` | `2` |
 | `libgit2/src/libgit2/odb.c` | `177` | `0` | `+0` | `+0` | `+1` | `+0` | `+0` | `+0` | `+0` | `+2` | `3` |
 | `libgit2/src/libgit2/odb.c` | `181` | `0` | `+1` | `+0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+2` | `3` |
-| **Σ** |  |  | **`+7`** | **`+9`** | **`+3`** | **`+1`** | **`+3`** | **`+3`** | **`+14`** | **`+55`** | **`95`** |
+| `libgit2/src/libgit2/diff_parse.c` | `229` | `0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+1` | `+1` | `2` |
+| **Σ** |  |  | **`+7`** | **`+9`** | **`+3`** | **`+1`** | **`+3`** | **`+3`** | **`+15`** | **`+56`** | **`97`** |
 
 ## Symbols
 
@@ -1319,6 +1323,40 @@ column. ASan+UBSan and TSan ran the batch's unit, `ub_safe` and `equiv` tests. M
 Each test marked `ignore` under Miri was run there alone and stops at `git_libgit2_init`. No test
 of the batch is expected to trigger BorrowSanitizer, so none ran under it. The five compile-fail
 snapshots of other modules still mismatch from the ffibox pin drift.
+
+### `libgit2/src/libgit2/diff_parse.c` wave 229: review of wave 228
+
+Wave 229 batch 0 reviews wave 228 batch 0's `DiffParseOptions` (`0fcf482ab`) and files two
+reports. Wave 228 batch 1 has not run, so its row covers the type alone. Under
+`+conventions`, `diff-parse-options-entry-point-unanchored`: the batch's new
+`Diff::from_buffer_with_options` is the only caller of `git_diff_from_buffer_ext` and takes its
+whole options surface. The `Wraps` anchor and alias stayed on `from_buffer_with_oid_type`,
+which only delegates to it. The anchor now sits on `from_buffer_with_options`, and the
+wrapped-symbol count is unchanged. Under `+misc`, as a `wavefront` report,
+`diff-from-buffer-ext-opts-note`: the `opts` note on `git_diff_from_buffer_ext`, submitted
+by `8f238f339`, described `git_diff_options` (pathspec, callbacks, payload, nested
+referents) and said `version` is read. The same properties are resubmitted with a note
+stating that only `oid_type` is read, during the call and unchecked. The lifecycle,
+unsafety, contracts, UB, equivalence and internal checks found nothing more. The type has no
+lifecycle routines (`--lifecycle-ops` is empty, and `git_diff_from_buffer_ext` is its only
+reader). `define_ctype!` keeps the layout field private, so safe code outside the module
+cannot store an unnamed `oid_type`. The six `Send`/`Sync` impls follow ffibox's documented
+pattern for a resource-free value. The C reads `oid_type` alone, and `GIT_OID_SHA256` is
+built unconditionally. `+LoC` is doc comments in `diff_parse.rs` alone.
+
+The `cov (C/Rust)` cells stay `—`, for wave 172's reason. No code path changed, and wave 228
+measured `diff_parse.rs` at `97.92`% of lines, the misses being the environment-dependent
+`runtime_pinned()` failure branches, so no coverage tests were added. The safety audit row
+compares binder run 99's scan of the wave tip's Rust with a scan of this tree, and every
+counter is equal. The Miri gate passed on the wave tip (`lib` 347, `ub_safe` 168,
+`ub_unsafe` 18 and `equiv` 32 passed, the tests that call C ignored), and again on the fixed
+tree. There, the side-by-side `ub_safe` invocation passed every test but exited on a
+`libc_sys` "rlib format" error, a race between the concurrent builds sharing `target/miri`.
+Rerun alone, it passed cleanly. The workset's `lib`, `ub_safe` and `equiv` tests pass under ASan+UBSan and TSan. This
+wave is not the module's last (wave 230 follows), and the review emitted no reproducer, so
+BSan did not run. `cargo test --workspace` fails only on the five compile-fail snapshots
+that the ffibox pin drift breaks. `cargo doc` warns only on the three pre-existing private
+`MISMATCH` links in `odb.rs`.
 
 ### Parallelism and review caps from `libgit2/repository`
 
