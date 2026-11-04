@@ -21481,7 +21481,7 @@
       "module": "src/libgit2/checkout.c",
       "foundational": false,
       "reviews": 334,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
           334
@@ -21498,11 +21498,14 @@
         {
           "index": 0,
           "kind": "review",
-          "status": "todo",
+          "status": "done",
           "reviews": [
             0
           ],
-          "commits": []
+          "commits": [
+            "08a294830b405b91f346e474b41c202825f3d407",
+            "833927054a4473cab18922361f406e1d7975a38c"
+          ]
         }
       ]
     },
