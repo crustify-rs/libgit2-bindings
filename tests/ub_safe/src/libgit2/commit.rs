@@ -385,10 +385,7 @@ mod commit {
     use libgit2::libgit2::src::util::errors::{ErrorClass, ErrorCode};
 
     use super::commit_id;
-    use crate::fixture::isolated;
-    use crate::fixture::object_and_tree_entry::{
-        enable_caching, object_view, open_testrepo, set_cache_max_size,
-    };
+    use crate::fixture::object_and_tree_entry::{object_view, open_testrepo};
 
     /// Commits of `testrepo.git`.
     const COMMITS: [&str; 8] = [
@@ -462,47 +459,6 @@ mod commit {
             }
             assert!(COMMITS.contains(&id.as_str()));
         }
-    }
-
-    /// With a tiny cache, commits are evicted while owners hold them; with the cache
-    /// off, every lookup parses a fresh commit. Each owner keeps its commit alive
-    /// either way.
-    #[test]
-    #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn owners_survive_eviction_and_a_disabled_cache() {
-        isolated(
-            concat!(
-                module_path!(),
-                "::owners_survive_eviction_and_a_disabled_cache"
-            ),
-            || {
-                set_cache_max_size(1);
-                let repo = open_testrepo();
-                let first: Vec<_> = COMMITS
-                    .iter()
-                    .map(|h| Commit::lookup(repo.as_ref(), id(h).as_ref()).unwrap())
-                    .collect();
-                let again: Vec<_> = COMMITS
-                    .iter()
-                    .map(|h| Commit::lookup(repo.as_ref(), id(h).as_ref()).unwrap())
-                    .collect();
-                for (a, b) in first.iter().zip(&again) {
-                    assert_eq!(hex(a), hex(b));
-                }
-                drop(first);
-                enable_caching(false);
-                let fresh = Commit::lookup(repo.as_ref(), id(COMMITS[0]).as_ref()).unwrap();
-                let other = Commit::lookup(repo.as_ref(), id(COMMITS[0]).as_ref()).unwrap();
-                assert!(!CommitArc::ptr_eq(&fresh, &other));
-                let array = CommitArray::from_commits(vec![fresh, other.clone()]).unwrap();
-                drop(other);
-                assert_eq!(
-                    array.as_ref().iter().map(commit_id).collect::<Vec<_>>(),
-                    [COMMITS[0]; 2]
-                );
-                drop(again);
-            },
-        );
     }
 
     /// Failing lookups leave nothing behind: objects of other types, missing and
@@ -667,44 +623,6 @@ mod commit {
         );
     }
 
-    /// With a one-byte cache every derived commit and tree is evicted while its owner
-    /// holds it, and with the cache off each derivation parses afresh: each owner keeps
-    /// its object alive either way.
-    #[test]
-    #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn derived_owners_survive_eviction_and_a_disabled_cache() {
-        isolated(
-            concat!(
-                module_path!(),
-                "::derived_owners_survive_eviction_and_a_disabled_cache"
-            ),
-            || {
-                set_cache_max_size(1);
-                let repo = open_testrepo();
-                let head = Commit::lookup(repo.as_ref(), id(COMMITS[0]).as_ref()).unwrap();
-                let derived: Vec<_> = (0..6)
-                    .map(|n| head.as_ref().nth_gen_ancestor(n).unwrap())
-                    .collect();
-                let trees: Vec<_> = derived.iter().map(|c| c.as_ref().tree().unwrap()).collect();
-                drop(head);
-                for (commit, expected) in derived.iter().zip([0, 1, 3, 4, 5, 6]) {
-                    assert_eq!(hex(commit), COMMITS[expected]);
-                }
-                drop(derived);
-                enable_caching(false);
-                let head = Commit::lookup(repo.as_ref(), id(COMMITS[0]).as_ref()).unwrap();
-                let a = head.as_ref().parent(0).unwrap();
-                let b = head.as_ref().parent(0).unwrap();
-                assert!(!CommitArc::ptr_eq(&a, &b));
-                let itself = head.as_ref().nth_gen_ancestor(0).unwrap();
-                assert!(CommitArc::ptr_eq(&itself, &head));
-                drop((head, a));
-                assert_eq!(hex(&b), COMMITS[1]);
-                drop((trees, itself, b));
-            },
-        );
-    }
-
     /// Refused derivations leave nothing behind (`LSan`) and the commit usable: a parent
     /// index past the last, ancestors past a root at every width, and the same through a
     /// commit whose repository has no further objects to give.
@@ -778,10 +696,8 @@ mod getters {
     use libgit2::libgit2::src::libgit2::oid::{Oid, OidType};
     use libgit2::libgit2::src::util::errors::{ErrorClass, ErrorCode};
 
-    use crate::fixture::object_and_tree_entry::{
-        enable_caching, open_testrepo, repository, write_raw,
-    };
-    use crate::fixture::{TempRepo, isolated};
+    use crate::fixture::TempRepo;
+    use crate::fixture::object_and_tree_entry::{open_testrepo, repository, write_raw};
 
     /// `testrepo.git`'s commits: `HEAD`, the merge, a root.
     const HEAD: &str = "a65fedf39aefe402d3bb6e24df4d4f5fe4547750";
@@ -867,32 +783,6 @@ mod getters {
         let lent = array.as_ref().get(2).unwrap();
         assert_eq!(lent.message(), c"testing\n");
         assert_eq!(lent.summary(), Ok(c"testing"));
-    }
-
-    /// With the cache off every lookup parses a fresh commit: the results of the
-    /// second stay valid once the first is freed, and the summaries are distinct.
-    #[test]
-    #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn results_of_fresh_commits_outlive_earlier_ones() {
-        isolated(
-            concat!(
-                module_path!(),
-                "::results_of_fresh_commits_outlive_earlier_ones"
-            ),
-            || {
-                enable_caching(false);
-                let repo = open_testrepo();
-                let first = Commit::lookup(repo.as_ref(), id(MERGE).as_ref()).unwrap();
-                let second = Commit::lookup(repo.as_ref(), id(MERGE).as_ref()).unwrap();
-                assert!(!CommitArc::ptr_eq(&first, &second));
-                let a = first.as_ref().summary().unwrap().as_ptr();
-                let kept = view(&second);
-                assert_ne!(a, kept.summary.as_ptr());
-                drop(first);
-                assert_eq!(kept.summary, c"Merge branch 'br2'");
-                assert!(touch(&kept) > 0);
-            },
-        );
     }
 
     /// Header fields are fresh buffers the caller owns: they outlive the commit and
@@ -1024,9 +914,6 @@ mod create_ext_options {
         CreateExtOptions, CreateExtOptionsMut, CreateExtOptionsRef, Header,
     };
 
-    use crate::fixture::TempRepo;
-    use crate::fixture::create_ext::{create, has_reference};
-
     type Fields<'o> = (
         Option<&'o CStr>,
         Option<&'o CStr>,
@@ -1135,33 +1022,6 @@ mod create_ext_options {
         m.set_update_ref(Some(c"HEAD"));
         assert_eq!(options.as_ref().update_ref(), Some(c"HEAD"));
         assert_eq!(format!("{:?}", options.as_mut()), format!("{options:?}"));
-    }
-
-    /// libgit2 reads the options for the call only: the commit it writes carries the
-    /// encoding and the headers, the reference it names is created, and nothing it was
-    /// given is read after the call (the heap borrows are freed right away).
-    #[test]
-    #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn libgit2_reads_the_options_for_the_call_only() {
-        let repo = TempRepo::new("commit-create-ext-options");
-        let name = CString::new("refs/heads/created").unwrap();
-        let encoding = CString::new("ISO-8859-1").unwrap();
-        let value = CString::new("one\ntwo").unwrap();
-        let headers = vec![Header::new(c"x-a", &value), Header::new(c"x-b", c"")];
-        let mut options = CreateExtOptions::new();
-        write(options.as_mut(), Some(&name), Some(&encoding), &headers);
-        let text = create(&repo, &mut options).unwrap();
-        drop(headers);
-        drop((value, encoding));
-        assert!(
-            text.contains("\nencoding ISO-8859-1\nx-a one\n two\nx-b \n\nmsg\n"),
-            "{text}"
-        );
-        assert!(has_reference(&repo, &name));
-
-        // The default options write a plain commit and move no reference.
-        let text = create(&repo, &mut CreateExtOptions::new()).unwrap();
-        assert!(text.ends_with("0000\n\nmsg\n"), "{text}");
     }
 }
 
@@ -1608,34 +1468,24 @@ mod create_options {
 /// the same repository commits in between; each thread commits in its own repository at
 /// once (`TSan`). Every test calls libgit2, so Miri skips them all.
 mod committing_on_head {
-    use std::cell::Cell;
+
     use std::ffi::{CStr, CString};
-    use std::panic::{AssertUnwindSafe, catch_unwind};
     use std::thread;
 
     use libgit2::libgit2::src::libgit2::blob::create_from_buffer;
     use libgit2::libgit2::src::libgit2::commit::{
-        Commit, CommitArc, CommitBuilderMut, CreateOptions, Header, SignatureCallback,
-        amend_from_stage, amend_from_tree, create_from_stage, create_from_tree,
+        CommitBuilderMut, CreateOptions, Header, SignatureCallback, amend_from_stage,
+        amend_from_tree, create_from_stage, create_from_tree,
     };
     use libgit2::libgit2::src::libgit2::filter::StreamError;
-    use libgit2::libgit2::src::libgit2::oid::Oid;
     use libgit2::libgit2::src::libgit2::repository::{Repository, RepositoryError, RepositoryRef};
-    use libgit2::libgit2::src::libgit2::signature::{Signature, SignatureBox, SignatureView, Time};
-    use libgit2::libgit2::src::libgit2::tag::create_annotation;
+    use libgit2::libgit2::src::libgit2::signature::{SignatureView, Time};
     use libgit2::libgit2::src::libgit2::tree::{FileMode, Tree, TreeArc, TreeBuilder};
     use libgit2::libgit2::src::util::errors::{ErrorClass, ErrorCode};
 
     use super::create_options::{empty_tree, text};
     use crate::fixture::object_and_tree_entry::repository;
-    use crate::fixture::stage::stage;
     use crate::fixture::{TempRepo, isolated};
-
-    /// An owned signature of `name`, its strings and struct on libgit2's heap.
-    fn owned(name: &str) -> SignatureBox {
-        let name = CString::new(name).unwrap();
-        Signature::new(&name, c"o@example.com", 11, 30).unwrap()
-    }
 
     /// A tree holding one blob of `data` under `name`.
     fn tree_of<'r>(repo: RepositoryRef<'r>, name: &CStr, data: &[u8]) -> TreeArc<'r> {
@@ -1671,93 +1521,6 @@ mod committing_on_head {
             e.class(),
             e.message().to_string_lossy().into_owned(),
         )
-    }
-
-    #[test]
-    #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn every_routine_reads_heap_inputs_for_the_call_only() {
-        isolated(
-            concat!(
-                module_path!(),
-                "::every_routine_reads_heap_inputs_for_the_call_only"
-            ),
-            || {
-                let repo = TempRepo::new("commit-on-head-heap");
-                let r = repository(&repo);
-                let file = tree_of(r, c"file", b"one\n");
-                let blob = create_from_buffer(r, b"two\n").unwrap();
-                let index = r.index().unwrap();
-                for (round, len) in [1usize, 15, 16, 255].into_iter().enumerate() {
-                    let name = CString::new("n".repeat(len)).unwrap().into_boxed_c_str();
-                    let view = Box::new(SignatureView::new(
-                        &name,
-                        &name,
-                        Time::new(i64::try_from(len).unwrap(), 60),
-                    ));
-                    let committer = owned(&"c".repeat(len));
-                    let encoding = CString::new("e".repeat(len)).unwrap().into_boxed_c_str();
-                    let value = CString::new(format!("{}\n{}", "v".repeat(len), "w")).unwrap();
-                    let headers = vec![Header::new(c"x-a", &value), Header::new(&name, c"")];
-                    let message = CString::new(format!("m{len}\n"))
-                        .unwrap()
-                        .into_boxed_c_str();
-                    let mut options = Box::new(CreateOptions::new());
-                    let mut m = CreateOptions::as_mut(&mut options);
-                    m.set_allow_empty_commit(true);
-                    m.set_author(Some(SignatureView::as_ref(&view)));
-                    m.set_committer(Some(committer.as_ref()));
-                    m.set_message_encoding(Some(&encoding));
-                    m.set_extra_headers(&headers);
-                    let tree = if round % 2 == 0 {
-                        empty_tree(r)
-                    } else {
-                        file.clone()
-                    };
-                    let id =
-                        create_from_tree(r, tree.as_ref(), &message, Some(m.as_mut())).unwrap();
-                    let created = text(r, &id);
-                    stage(&index, &file, &[(c"other", &blob)]);
-                    let staged = create_from_stage(r, &message, Some(m.as_mut())).unwrap();
-                    let staged = text(r, &staged);
-                    let amended =
-                        amend_from_tree(r, tree.as_ref(), None, Some(m.as_mut())).unwrap();
-                    let amended = text(r, &amended);
-                    stage(&index, &tree, &[]);
-                    let restaged = amend_from_stage(r, Some(&message), Some(m.as_mut())).unwrap();
-                    let restaged = text(r, &restaged);
-                    drop(options);
-                    drop(headers);
-                    drop((value, encoding, committer, view));
-                    let expected = format!(
-                        "\nauthor {n} <{n}> {len} +0100\ncommitter {c} <o@example.com> 11 +0030\n\
-                         encoding {e}\nx-a {v}\n w\n{n} \n\nm{len}\n",
-                        n = "n".repeat(len),
-                        c = "c".repeat(len),
-                        e = "e".repeat(len),
-                        v = "v".repeat(len),
-                    );
-                    for (what, text) in [
-                        ("created", &created),
-                        ("staged", &staged),
-                        ("amended", &amended),
-                        ("restaged", &restaged),
-                    ] {
-                        assert!(text.ends_with(&expected), "{what}: {text}");
-                    }
-                    assert!(staged.contains("\nparent "), "{staged}");
-                    drop(name);
-                    drop(message);
-                }
-                // No options at all: the configured identity, which a fresh repository may
-                // lack; both forms of failure leave `HEAD` alone.
-                let before = head(&repo);
-                let outcome = create_from_tree(r, file.as_ref(), c"no options\n", None);
-                if let Err(e) = &outcome {
-                    assert_eq!(e.raw_code(), -1, "{e:?}");
-                    assert_eq!(head(&repo), before);
-                }
-            },
-        );
     }
 
     /// The configured default identity, written into the repository's configuration.
@@ -1842,270 +1605,6 @@ mod committing_on_head {
                 let e = amend_from_tree(r, foreign.as_ref(), None, None).unwrap_err();
                 assert_eq!(code(e), tree);
                 assert_eq!(head(&repo).as_deref(), Some(first_hex.as_str()));
-            },
-        );
-    }
-
-    /// Writes `MERGE_HEAD` with `text`.
-    fn merge_head(repo: &TempRepo, text: &str) {
-        std::fs::write(repo.path.join("MERGE_HEAD"), text).unwrap();
-    }
-
-    /// libgit2's parents collection frees `HEAD`'s commit (and the merged ones before the
-    /// failing line) while the object cache holds them when `MERGE_HEAD` cannot be read
-    /// through; the wrappers fail without it, and every cached commit stays readable.
-    #[test]
-    #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn unreadable_merge_heads_leave_cached_commits_alone() {
-        isolated(
-            concat!(
-                module_path!(),
-                "::unreadable_merge_heads_leave_cached_commits_alone"
-            ),
-            || {
-                let repo = TempRepo::new("commit-on-head-merge");
-                configure_identity(&repo);
-                let r = repository(&repo);
-                let (empty, file) = (empty_tree(r), tree_of(r, c"file", b"x\n"));
-                let mut options = CreateOptions::new();
-                options.as_mut().set_allow_empty_commit(true);
-                let root =
-                    create_from_tree(r, empty.as_ref(), c"root\n", Some(options.as_mut())).unwrap();
-                let side = create_from_tree(r, file.as_ref(), c"side\n", None).unwrap();
-                let tip = create_from_tree(r, empty.as_ref(), c"tip\n", None).unwrap();
-                // Cached and held: freeing them behind the cache would show on these reads.
-                let held: Vec<CommitArc<'_>> = [&root, &side, &tip]
-                    .iter()
-                    .map(|id| Commit::lookup(r, id.as_ref()).unwrap())
-                    .collect();
-                let hex = |id: &Oid| id.as_ref().to_hex_string().unwrap();
-                let missing = "0123456789012345678901234567890123456789";
-                let index = r.index().unwrap();
-                for (contents, message) in [
-                    (
-                        format!("{}\nshort\n", hex(&root)),
-                        "unable to parse OID - invalid length",
-                    ),
-                    (format!("{}\n{missing}\n", hex(&side)), ""),
-                    (
-                        format!("{}\n{}", hex(&root), hex(&side)),
-                        "no EOL at line 2",
-                    ),
-                    (format!("{}\n{}\n", hex(&root), hex(&empty_id(&empty))), ""),
-                ] {
-                    merge_head(&repo, &contents);
-                    let e = create_from_tree(r, file.as_ref(), c"merge\n", None).unwrap_err();
-                    assert_eq!(e.raw_code(), -1, "{contents:?}: {e:?}");
-                    assert!(e.message().to_str().unwrap().contains(message), "{e:?}");
-                    stage(&index, &file, &[]);
-                    let e = create_from_stage(r, c"merge\n", None).unwrap_err();
-                    assert_eq!(e.raw_code(), -1, "{contents:?}: {e:?}");
-                    for (commit, id) in held.iter().zip([&root, &side, &tip]) {
-                        assert_eq!(hex(&commit.as_ref().id().to_oid()), hex(id));
-                        assert_eq!(commit.as_ref().author().name(), Some(c"Default Identity"));
-                        let again = Commit::lookup(r, id.as_ref()).unwrap();
-                        assert_eq!(
-                            again.as_ref().message_raw().to_bytes().len(),
-                            commit.as_ref().message_raw().to_bytes().len()
-                        );
-                    }
-                    assert_eq!(head(&repo), Some(hex(&tip)));
-                }
-                // A readable `MERGE_HEAD`: the merged commits are the second and third parents.
-                merge_head(&repo, &format!("{}\n{}\n", hex(&root), hex(&side)));
-                let merge = create_from_tree(r, file.as_ref(), c"merge\n", None).unwrap();
-                let commit = Commit::lookup(r, merge.as_ref()).unwrap();
-                let parents: Vec<String> = (0..commit.as_ref().parent_count())
-                    .map(|n| {
-                        commit
-                            .as_ref()
-                            .parent_id(n)
-                            .unwrap()
-                            .to_hex_string()
-                            .unwrap()
-                    })
-                    .collect();
-                assert_eq!(parents, [hex(&tip), hex(&root), hex(&side)]);
-                drop((commit, held, index));
-            },
-        );
-    }
-
-    fn empty_id(tree: &TreeArc<'_>) -> Oid {
-        tree.as_ref().id().to_oid()
-    }
-
-    /// `HEAD` detached at a tag or a tree: libgit2's collection would write that object
-    /// as a parent; the creating wrappers fail without writing a commit. Amending peels
-    /// `HEAD` to its commit, as libgit2 does.
-    #[test]
-    #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn head_at_a_tag_or_a_tree_is_not_written_as_a_parent() {
-        isolated(
-            concat!(
-                module_path!(),
-                "::head_at_a_tag_or_a_tree_is_not_written_as_a_parent"
-            ),
-            || {
-                let repo = TempRepo::new("commit-on-head-detached");
-                configure_identity(&repo);
-                let r = repository(&repo);
-                let (empty, file) = (empty_tree(r), tree_of(r, c"file", b"x\n"));
-                let mut options = CreateOptions::new();
-                options.as_mut().set_allow_empty_commit(true);
-                let root =
-                    create_from_tree(r, empty.as_ref(), c"root\n", Some(options.as_mut())).unwrap();
-                let commit = Commit::lookup(r, root.as_ref()).unwrap();
-                let tagger = owned("Tagger");
-                let tag = create_annotation(
-                    r,
-                    c"v1",
-                    commit.as_ref().as_object(),
-                    tagger.as_ref(),
-                    c"t\n",
-                )
-                .unwrap();
-                let objects = |repo: &TempRepo| {
-                    std::fs::read_dir(repo.path.join("objects"))
-                        .unwrap()
-                        .filter_map(Result::ok)
-                        .filter(|e| e.file_name().len() == 2)
-                        .map(|e| std::fs::read_dir(e.path()).unwrap().count())
-                        .sum::<usize>()
-                };
-                let head_file = repo.path.join("HEAD");
-                std::fs::write(
-                    &head_file,
-                    format!("{}\n", tag.as_ref().to_hex_string().unwrap()),
-                )
-                .unwrap();
-                let before = objects(&repo);
-                let e = create_from_tree(r, file.as_ref(), c"on a tag\n", None).unwrap_err();
-                assert_eq!(e.code(), Some(ErrorCode::Modified), "{e:?}");
-                assert_eq!(objects(&repo), before);
-                let index = r.index().unwrap();
-                stage(&index, &file, &[]);
-                let e = create_from_stage(r, c"on a tag\n", None).unwrap_err();
-                assert_eq!(e.code(), Some(ErrorCode::Modified), "{e:?}");
-                // The index's tree, written before the commit, is the file tree already held.
-                assert_eq!(objects(&repo), before);
-                let amended = amend_from_tree(r, file.as_ref(), Some(c"amended\n"), None).unwrap();
-                let amended = Commit::lookup(r, amended.as_ref()).unwrap();
-                assert_eq!(amended.as_ref().parent_count(), 0);
-                assert_eq!(
-                    std::fs::read_to_string(&head_file).unwrap().trim(),
-                    amended.as_ref().id().to_hex_string().unwrap()
-                );
-
-                let tree_hex = empty_id(&empty).as_ref().to_hex_string().unwrap();
-                std::fs::write(&head_file, format!("{tree_hex}\n")).unwrap();
-                let before = objects(&repo);
-                let e = create_from_tree(r, file.as_ref(), c"on a tree\n", None).unwrap_err();
-                assert_eq!(e.raw_code(), -1, "{e:?}");
-                let e = create_from_stage(r, c"on a tree\n", None).unwrap_err();
-                assert_eq!(e.raw_code(), -1, "{e:?}");
-                assert_eq!(objects(&repo), before);
-                let e = amend_from_tree(r, file.as_ref(), None, None).unwrap_err();
-                assert!(e.raw_code() < 0);
-                assert_eq!(
-                    std::fs::read_to_string(&head_file).unwrap().trim(),
-                    tree_hex
-                );
-            },
-        );
-    }
-
-    /// A signer stored in the options: a refusal fails the call with its code, and a
-    /// panic stops the commit and resumes from each wrapper, once libgit2 returned and
-    /// before `HEAD` moved; the signer then signs again. A signer re-entering the
-    /// routines commits on the same repository in between, which the outer commit then
-    /// finds `HEAD` moved by.
-    #[test]
-    #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn signers_refuse_panic_and_reenter_through_every_routine() {
-        isolated(
-            concat!(
-                module_path!(),
-                "::signers_refuse_panic_and_reenter_through_every_routine"
-            ),
-            || {
-                let repo = TempRepo::new("commit-on-head-signer");
-                configure_identity(&repo);
-                let r = repository(&repo);
-                let (empty, file) = (empty_tree(r), tree_of(r, c"file", b"x\n"));
-                let mut options = CreateOptions::new();
-                options.as_mut().set_allow_empty_commit(true);
-                create_from_tree(r, empty.as_ref(), c"root\n", Some(options.as_mut())).unwrap();
-                let index = r.index().unwrap();
-
-                let mode = Cell::new(0);
-                let calls = Cell::new(0);
-                let mut f = |mut builder: CommitBuilderMut<'_>,
-                             repo: RepositoryRef<'_>,
-                             _: &CStr| {
-                    calls.set(calls.get() + 1);
-                    match mode.get() {
-                        1 => Err(StreamError::new(ErrorClass::Callback, c"refused")
-                            .with_code(ErrorCode::Ambiguous)),
-                        2 => panic!("signer panicked"),
-                        3 => {
-                            // Commits on the same repository, under the outer commit.
-                            let tree = empty_tree(repo);
-                            let mut inner = CreateOptions::new();
-                            inner.as_mut().set_allow_empty_commit(true);
-                            create_from_tree(repo, tree.as_ref(), c"inner\n", Some(inner.as_mut()))
-                                .map(drop)
-                                .map_err(|e| StreamError::from(e.error().clone()))
-                        }
-                        _ => builder
-                            .add_header(c"gpgsig", c"sig")
-                            .map_err(StreamError::from),
-                    }
-                };
-                let mut signer = SignatureCallback::new(&mut f);
-                let mut options = CreateOptions::new();
-                options.as_mut().set_allow_empty_commit(true);
-                options.as_mut().set_signer(Some(&mut signer));
-                let run = |which: usize, options: &mut CreateOptions<'_>| {
-                    let o = Some(options.as_mut());
-                    match which {
-                        0 => create_from_tree(r, file.as_ref(), c"t\n", o),
-                        1 => {
-                            stage(&index, &file, &[]);
-                            create_from_stage(r, c"s\n", o)
-                        }
-                        2 => amend_from_tree(r, empty.as_ref(), None, o),
-                        _ => {
-                            stage(&index, &empty, &[]);
-                            amend_from_stage(r, Some(c"a\n"), o)
-                        }
-                    }
-                };
-                for which in 0..4 {
-                    let before = head(&repo);
-                    mode.set(1);
-                    let e = run(which, &mut options).unwrap_err();
-                    assert_eq!(e.code(), Some(ErrorCode::Ambiguous), "{which}");
-                    assert_eq!(e.message(), c"refused");
-                    mode.set(2);
-                    let caught = catch_unwind(AssertUnwindSafe(|| run(which, &mut options)));
-                    assert_eq!(
-                        caught.unwrap_err().downcast_ref::<&str>(),
-                        Some(&"signer panicked"),
-                        "{which}"
-                    );
-                    assert_eq!(head(&repo), before, "{which}");
-                    mode.set(3);
-                    let e = run(which, &mut options).unwrap_err();
-                    assert_eq!(e.code(), Some(ErrorCode::Modified), "{which}: {e:?}");
-                    assert_ne!(head(&repo), before, "{which}");
-                    mode.set(0);
-                    let id = run(which, &mut options).unwrap();
-                    assert!(text(r, &id).contains("\ngpgsig sig\n"), "{which}");
-                }
-                signer.resume_panic();
-                drop(signer);
-                assert_eq!(calls.get(), 16);
             },
         );
     }

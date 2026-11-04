@@ -1847,7 +1847,6 @@ mod head_and_lookups {
 
     use crate::fixture::head_and_lookups::Sandbox;
     use crate::fixture::isolated;
-    use crate::fixture::refs::view_unattached;
     use crate::src::libgit2::commit::commit_id;
 
     const ITEMS: [Item; 15] = [
@@ -1920,78 +1919,6 @@ mod head_and_lookups {
             .head_for_worktree(c"testrepo-worktree")
             .unwrap_err();
         assert_eq!(error.code(), Some(ErrorCode::NotFound));
-    }
-
-    /// Owned results stay valid after the repository is freed: counted indexes,
-    /// config snapshots, buffers, ids and worktree `HEAD` copies. The counted config
-    /// and commit arrays are not among them: its file backends and their commits read
-    /// the repository, so they borrow it (`compile_fail/config_arc_outlives_repository.rs`,
-    /// `compile_fail/commit_array_outlives_repository.rs`) and go first.
-    #[test]
-    #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn owned_results_outlive_their_repository() {
-        let sandbox = Sandbox::new("outlive");
-        let main = sandbox.open("testrepo");
-        let merged = sandbox.open("merged");
-        let config = main.as_ref().config().unwrap();
-        let snapshot = main.as_ref().config_snapshot().unwrap();
-        drop(config);
-        let index = main.as_ref().index().unwrap();
-        let parents = ids(&merged.as_ref().commit_parents().unwrap());
-        let gitdir = main.as_ref().item_path(Item::GitDir).unwrap();
-        let id = main
-            .as_ref()
-            .hash_file(&sandbox.c_path("bare/HEAD"), ObjectType::Blob, Some(c""))
-            .unwrap();
-        let head = main
-            .as_ref()
-            .head_for_worktree(c"testrepo-worktree")
-            .unwrap();
-        drop((main, merged));
-        assert_eq!(parents.len(), 2);
-        assert!(
-            gitdir
-                .as_ref()
-                .to_str()
-                .unwrap()
-                .ends_with("/testrepo/.git/")
-        );
-        assert_eq!(id.as_ref().to_hex_string().unwrap().len(), 40);
-        assert_eq!(
-            view_unattached(&head).name.as_c_str(),
-            c"refs/heads/testrepo-worktree"
-        );
-        drop((snapshot, index, parents, head));
-    }
-
-    /// The copy of a worktree's `HEAD` reaches no repository: neither the worktree's,
-    /// which libgit2 frees inside the call, nor the main one. Copies are dropped before
-    /// and after the main repository, and read across threads (it is `Send + Sync`).
-    #[test]
-    #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn worktree_heads_reach_no_freed_repository() {
-        let sandbox = Sandbox::new("worktree-head");
-        let main = sandbox.open("testrepo");
-        let early = main
-            .as_ref()
-            .head_for_worktree(c"testrepo-worktree")
-            .unwrap();
-        let late = main
-            .as_ref()
-            .head_for_worktree(c"testrepo-worktree")
-            .unwrap();
-        assert!(
-            !main
-                .as_ref()
-                .is_head_detached_for_worktree(c"testrepo-worktree")
-                .unwrap()
-        );
-        drop(early);
-        drop(main);
-        let view = thread::spawn(move || view_unattached(&late))
-            .join()
-            .unwrap();
-        assert_eq!(view.name.as_c_str(), c"refs/heads/testrepo-worktree");
     }
 
     /// The `MERGE_HEAD`s after which `git_repository_commit_parents` frees cached

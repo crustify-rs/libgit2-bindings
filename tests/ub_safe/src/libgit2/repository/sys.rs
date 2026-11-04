@@ -310,10 +310,9 @@ mod submodule_cache {
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
 
-    use libgit2::ffi;
     use libgit2::libgit2::src::libgit2::repository::Repository;
 
-    use crate::fixture::submodule::{ModulesRepo, Submodule};
+    use crate::fixture::submodule::ModulesRepo;
 
     #[test]
     #[cfg_attr(miri, ignore = "calls libgit2")]
@@ -330,29 +329,6 @@ mod submodule_cache {
         m.repo.as_mut().clear_submodule_cache();
         // The repository releases the cache it still holds.
         m.repo.as_mut().cache_submodules().unwrap();
-    }
-
-    #[test]
-    #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn cached_submodules_outlive_the_cache_and_the_repository() {
-        let mut m = ModulesRepo::new("outlive");
-        m.repo.as_mut().cache_submodules().unwrap();
-        let cached = Submodule::lookup(&m.repo, c"sub").unwrap();
-        // The cache answers with what it loaded, whatever `.gitmodules` says now.
-        m.set_ignore("all");
-        let again = Submodule::lookup(&m.repo, c"sub").unwrap();
-        assert_eq!(again.ignore(), ffi::GIT_SUBMODULE_IGNORE_NONE);
-        m.repo.as_mut().clear_submodule_cache();
-        assert_eq!(cached.ignore(), ffi::GIT_SUBMODULE_IGNORE_NONE);
-        // Reloading drops the old cache's references, not the ones handed out.
-        m.repo.as_mut().cache_submodules().unwrap();
-        m.repo.as_mut().cache_submodules().unwrap();
-        let fresh = Submodule::lookup(&m.repo, c"sub").unwrap();
-        assert_eq!(fresh.ignore(), ffi::GIT_SUBMODULE_IGNORE_ALL);
-        drop(m);
-        assert_eq!(cached.ignore(), ffi::GIT_SUBMODULE_IGNORE_NONE);
-        assert_eq!(again.ignore(), ffi::GIT_SUBMODULE_IGNORE_NONE);
-        assert_eq!(fresh.ignore(), ffi::GIT_SUBMODULE_IGNORE_ALL);
     }
 
     #[test]

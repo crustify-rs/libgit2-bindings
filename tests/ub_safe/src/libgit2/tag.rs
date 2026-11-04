@@ -138,10 +138,10 @@ mod tag_object {
     use libgit2::libgit2::src::libgit2::tag::{Tag, TagArc, TagRef};
     use libgit2::libgit2::src::util::errors::{ErrorClass, ErrorCode};
 
+    use crate::fixture::TempRepo;
     use crate::fixture::object_and_tree_entry::{
-        enable_caching, object_view, open_testrepo, repository, set_cache_max_size, write_raw,
+        object_view, open_testrepo, repository, write_raw,
     };
-    use crate::fixture::{TempRepo, isolated};
 
     /// Every tag of `testrepo.git`: `test` (of tag `e90810b`), `e90810b`, `hard_tag`,
     /// `taggerless` and `annotated_tag_to_blob`.
@@ -222,25 +222,6 @@ mod tag_object {
             drop(as_object);
             assert_eq!(read(second.as_ref()), expected);
         }
-    }
-
-    /// With the cache emptied of the tag, the getters read the tag the owner keeps.
-    #[test]
-    #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn getters_survive_cache_eviction() {
-        isolated(
-            concat!(module_path!(), "::getters_survive_cache_eviction"),
-            || {
-                let repo = open_testrepo();
-                let tag = Tag::lookup(repo.as_ref(), id(TAGS[0]).as_ref()).unwrap();
-                let expected = read(tag.as_ref());
-                set_cache_max_size(1);
-                for hex_id in TAGS.iter().cycle().take(64) {
-                    drop(Tag::lookup(repo.as_ref(), id(hex_id).as_ref()).unwrap());
-                }
-                assert_eq!(read(tag.as_ref()), expected);
-            },
-        );
     }
 
     /// `target` and `peel` hand out owners of their own, which outlive the tag; they
@@ -538,58 +519,6 @@ mod tag_object {
                 .unwrap();
             assert_eq!(Tag::from_object(peeled).map(|t| hex(&t)).unwrap(), hex_id);
         }
-    }
-
-    /// With a cache limit of one byte, the cache evicts tags as fast as they come, while
-    /// owners still hold them: the owners' references keep them alive.
-    #[test]
-    #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn owners_outlive_cache_eviction() {
-        isolated(
-            concat!(module_path!(), "::owners_outlive_cache_eviction"),
-            || {
-                let repo = open_testrepo();
-                set_cache_max_size(1);
-                for round in 0..4 {
-                    let held: Vec<_> = TAGS
-                        .iter()
-                        .map(|h| Tag::lookup(repo.as_ref(), id(h).as_ref()).unwrap())
-                        .collect();
-                    let clones: Vec<_> = held.iter().rev().map(|t| t.as_ref().to_tag()).collect();
-                    drop(held);
-                    for (tag, h) in clones.iter().rev().zip(TAGS) {
-                        assert_eq!(hex(tag), h, "round {round}");
-                    }
-                }
-            },
-        );
-    }
-
-    /// With caching off, every lookup parses a fresh tag, which its owners alone count;
-    /// dropping the last frees it, with its name, tagger and message.
-    #[test]
-    #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn without_a_cache_each_lookup_is_a_fresh_tag() {
-        isolated(
-            concat!(
-                module_path!(),
-                "::without_a_cache_each_lookup_is_a_fresh_tag"
-            ),
-            || {
-                let repo = open_testrepo();
-                enable_caching(false);
-                for hex_id in TAGS {
-                    let first = Tag::lookup(repo.as_ref(), id(hex_id).as_ref()).unwrap();
-                    let second = Tag::lookup_prefix(repo.as_ref(), id(hex_id).as_ref(), 8).unwrap();
-                    assert!(!TagArc::ptr_eq(&first, &second));
-                    let clone = first.clone();
-                    drop(first);
-                    assert_eq!(hex(&clone), hex_id);
-                    drop(second);
-                    assert_eq!(hex(&clone), hex_id);
-                }
-            },
-        );
     }
 
     /// Each thread opens its own repository and looks its tags up, clones and converts

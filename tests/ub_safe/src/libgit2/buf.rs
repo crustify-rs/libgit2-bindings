@@ -12,11 +12,10 @@
 use std::sync::Barrier;
 use std::thread;
 
-use libgit2::ffi;
 use libgit2::libgit2::src::libgit2::buf::{Buf, BufMut, BufRef, BufVal};
 use libgit2::libgit2::src::libgit2::odb::{OdbDataStrFree, OdbDataVec};
 
-use crate::fixture::{fill_from_option, isolated, set_str_option};
+use crate::fixture::isolated;
 
 /// `len` bytes without a NUL, so a C string read must stop at the terminator.
 fn pattern(len: usize) -> Vec<u8> {
@@ -194,64 +193,6 @@ fn moves_and_replacements_release_once() {
     drop(copy);
     let empty: OdbDataVec<u8> = Buf::new().as_mut().take_bytes();
     assert!(empty.is_empty());
-}
-
-/// libgit2's results: an owned string, refilled in place and reallocated, the
-/// unallocated static empty string, which is never freed, and a Rust-built allocation
-/// libgit2 reuses. C writes each buffer between Rust's reads (`BSan`: no stale view).
-#[test]
-#[cfg_attr(miri, ignore = "calls libgit2")]
-fn libgit2_results_are_read_reused_and_released_once() {
-    isolated(
-        concat!(
-            module_path!(),
-            "::libgit2_results_are_read_reused_and_released_once"
-        ),
-        || {
-            let (ua, tp) = (ffi::GIT_OPT_GET_USER_AGENT, ffi::GIT_OPT_GET_TEMPLATE_PATH);
-            set_str_option(ffi::GIT_OPT_SET_TEMPLATE_PATH, Some(c""));
-            let mut buf = Buf::new();
-            for agent in [
-                c"crustify/1.0",
-                c"x",
-                c"a much longer user agent than before",
-                c"",
-            ] {
-                set_str_option(ffi::GIT_OPT_SET_USER_AGENT, Some(agent));
-                fill_from_option(ua, &mut buf);
-                assert_eq!(buf.as_ref().as_c_str(), agent);
-                assert_eq!(buf.as_ref().as_bytes(), agent.to_bytes());
-                assert!(buf.as_ref().capacity() > buf.as_ref().len());
-            }
-            fill_from_option(tp, &mut buf);
-            assert!(buf.as_ref().is_empty() && buf.as_ref().capacity() > 0);
-
-            let mut empty = Buf::new();
-            fill_from_option(tp, &mut empty);
-            assert_eq!((empty.as_ref().len(), empty.as_ref().capacity()), (0, 0));
-            assert_eq!(empty.as_ref().as_c_str(), c"");
-            assert!(empty.as_ref().to_buf().unwrap().as_ref().is_empty());
-            fill_from_option(tp, &mut empty);
-            assert!(empty.as_mut().take_str().is_none());
-            drop(empty);
-
-            set_str_option(ffi::GIT_OPT_SET_USER_AGENT, Some(c"crustify/2.0"));
-            let mut ours = Buf::from_bytes(&pattern(3)).unwrap();
-            fill_from_option(ua, &mut ours);
-            assert_eq!(ours.as_ref().to_str(), Ok("crustify/2.0"));
-            let s = ours.as_mut().take_str().unwrap();
-            fill_from_option(ua, &mut ours);
-            let bytes = ours.as_mut().take_bytes();
-            assert_eq!(s.as_bytes(), bytes.as_slice());
-            fill_from_option(ua, &mut ours);
-            fill_from_option(tp, &mut buf);
-            drop((buf, ours));
-            assert_eq!(s.to_str(), Ok("crustify/2.0"));
-
-            set_str_option(ffi::GIT_OPT_SET_TEMPLATE_PATH, None);
-            set_str_option(ffi::GIT_OPT_SET_USER_AGENT, None);
-        },
-    );
 }
 
 /// Shared handles read one buffer from several threads at once; owners and the

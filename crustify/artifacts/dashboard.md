@@ -891,6 +891,14 @@ raw, each for a form the wrappers do not offer, as its docs say: a C blob stream
 handle to a repository's shared index. The other 28 have no wrapper yet. See
 `crustify/reviews/wave-526/batch-0/misc/ub-safe-fixture-outlives-its-safe-constructors/`.
 
+The safe UB suite then forbids `unsafe_code` at its root (`tests/ub_safe/main.rs`), as the
+testing spec (crustify `40f922d`) and the conventions ask, done by the assistant at the user's
+request: the fixture's `expect(unsafe_code)` is gone, and with it every fixture that built its
+inputs through a raw producer, and the test module of `checkout.rs` that called libgit2 directly.
+118 of the suite's 806 tests needed them and are removed (688 remain); each comes back in the batch
+that wraps the producer it needs. `removed-tests.md` in that review's directory lists them, with the
+24 unwrapped producers the removed fixtures called.
+
 ### BSan skips the compile-fail suite
 
 `trybuild`'s nested cargo build does not finish under BorrowSanitizer, so

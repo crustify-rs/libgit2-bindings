@@ -68,15 +68,12 @@ fn levels_cross_threads() {
 mod callback {
     use std::cell::Cell;
     use std::ffi::{CStr, CString};
-    use std::process::Command;
     use std::sync::Mutex;
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering::SeqCst;
     use std::thread;
 
     use libgit2::libgit2::src::libgit2::trace::{TraceCallback, TraceLevel, Tracer};
-
-    use crate::fixture::{connect, isolated, serve_404, set_trace};
 
     /// Copies every message into one shared log.
     struct Copying;
@@ -185,79 +182,5 @@ mod callback {
                 (0, outer),
             ]
         );
-    }
-
-    /// libgit2 calls the tracer on every thread that connects, at once.
-    #[test]
-    #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn libgit2_traces_from_several_threads() {
-        isolated(
-            concat!(module_path!(), "::libgit2_traces_from_several_threads"),
-            || {
-                let url = serve_404();
-                // Untraced: sets up the HTTP client's lazy statics before the threads
-                // race to (see `connect`).
-                assert!(connect(&url) < 0);
-                set_trace(TraceLevel::Trace, Some(TraceCallback::new::<Copying>()));
-                let threads = if cfg!(bsan) { 2 } else { 4 };
-                thread::scope(|s| {
-                    for _ in 0..threads {
-                        s.spawn(|| {
-                            for _ in 0..3 {
-                                assert!(connect(&url) < 0, "the server answers 404");
-                            }
-                        });
-                    }
-                });
-                set_trace(TraceLevel::None, None);
-                let log = std::mem::take(&mut *COPIES.lock().unwrap());
-                let connecting = log
-                    .iter()
-                    .filter(|(level, m)| {
-                        *level == TraceLevel::Debug
-                            && m.to_bytes().starts_with(b"Connecting to remote 127.0.0.1")
-                    })
-                    .count();
-                assert_eq!(connecting, threads * 3);
-                assert!(log.iter().any(|(level, _)| *level == TraceLevel::Trace));
-                // Cleared: libgit2 calls nothing any more.
-                assert!(connect(&url) < 0);
-                assert!(COPIES.lock().unwrap().is_empty());
-            },
-        );
-    }
-
-    struct Panicking;
-
-    impl Tracer for Panicking {
-        fn trace(_: TraceLevel, message: &CStr) {
-            panic!("tracer refused {message:?}");
-        }
-    }
-
-    const ABORT_CHILD: &str = "CRUSTIFY_UB_SAFE_ABORT_CHILD";
-
-    /// A panic in the tracer cannot unwind through libgit2's frame: the process aborts.
-    #[test]
-    #[cfg_attr(miri, ignore = "spawns a child process")]
-    #[cfg_attr(bsan, ignore = "the child's abort path spins under BorrowSanitizer")]
-    fn panicking_tracer_aborts() {
-        let name = concat!(module_path!(), "::panicking_tracer_aborts");
-        let name = name.split_once("::").map_or(name, |(_, rest)| rest);
-        if std::env::var(ABORT_CHILD).is_ok() {
-            let url = serve_404();
-            set_trace(TraceLevel::Debug, Some(TraceCallback::new::<Panicking>()));
-            connect(&url);
-            unreachable!("the trampoline must not return from a panic");
-        }
-        let out = Command::new(std::env::current_exe().unwrap())
-            .args([name, "--exact", "--test-threads=1", "--nocapture"])
-            .env(ABORT_CHILD, "1")
-            .output()
-            .unwrap();
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(!out.status.success(), "{stderr}");
-        assert!(stderr.contains("tracer refused"), "{stderr}");
-        assert!(!stderr.contains("must not return"), "{stderr}");
     }
 }

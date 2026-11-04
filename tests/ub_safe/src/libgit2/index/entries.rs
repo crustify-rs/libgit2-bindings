@@ -19,7 +19,7 @@ use libgit2::libgit2::src::libgit2::repository::{Repository, RepositoryBox, Repo
 use libgit2::libgit2::src::libgit2::tree::{FileMode, Tree, TreeArc, TreeBuilder};
 
 use super::{Scratch, c_path};
-use crate::fixture::index::{add_staged, isolated_tolerating_leaks, repository_index_box};
+use crate::fixture::index::isolated_tolerating_leaks;
 use crate::fixture::init;
 
 /// An entry of mode `mode` at `path` and `stage`, of id type `kind` with first id byte
@@ -261,130 +261,6 @@ fn additions_free_what_they_replace_once() {
     }
 }
 
-/// On an index a repository owns, a conflict whose second side names an object the
-/// repository lacks keeps the first side added and frees the rest; ids of another type
-/// are refused before libgit2 looks them up, and buffers become blobs whose entries
-/// replace and resolve conflicts, freeing what they move.
-#[test]
-#[cfg_attr(miri, ignore = "calls libgit2")]
-#[expect(
-    clippy::large_stack_arrays,
-    reason = "the test needs a buffer past the size the code under test treats specially"
-)]
-fn owned_index_additions_fail_and_resolve_without_leaks() {
-    init();
-    let scratch = Scratch::new("entries-owned");
-    let repo = work_repo(&scratch);
-    let present = create_from_buffer(repo.as_ref(), b"present").unwrap();
-    let mut index = repository_index_box(&repo);
-    let mut handle = index.as_mut();
-    let mut ancestor = blob(c"f", 0);
-    ancestor.as_mut().set_id(present.as_ref());
-    let missing = blob(c"f", 0xEE);
-    let error = handle.add_conflict(
-        Some(ancestor.as_ref()),
-        Some(missing.as_ref()),
-        Some(missing.as_ref()),
-    );
-    assert_eq!(error.unwrap_err().raw_code(), -1);
-    let conflict = handle.conflict(c"f").unwrap();
-    assert!(conflict.ancestor.is_some() && conflict.ours.is_none() && conflict.theirs.is_none());
-    for kind in [u8::try_from(OidType::Sha256.raw()).unwrap(), 0, 3, u8::MAX] {
-        let foreign = entry(c"g", 0, kind, 1, FileMode::Blob);
-        assert_eq!(handle.add(foreign.as_ref()).unwrap_err().raw_code(), -1);
-        let refused = handle.add_conflict(None, Some(foreign.as_ref()), None);
-        assert_eq!(refused.unwrap_err().raw_code(), -1);
-    }
-    // Conflict stages are refused: libgit2 would free the new entry while adding it.
-    for stage in 1..=3 {
-        let side = entry(c"f", stage, 1, 1, FileMode::Blob);
-        let refused = handle.add_from_buffer(side.as_ref(), b"side").unwrap_err();
-        assert_eq!(refused.raw_code(), -1);
-    }
-    assert!(handle.conflict(c"f").unwrap().ancestor.is_some());
-    // The buffer's blob replaces any id, foreign ones included.
-    let foreign = entry(
-        c"f",
-        0,
-        u8::try_from(OidType::Sha256.raw()).unwrap(),
-        1,
-        FileMode::Blob,
-    );
-    handle
-        .add_from_buffer(foreign.as_ref(), b"resolved")
-        .unwrap();
-    assert!(handle.conflict(c"f").is_none());
-    assert_eq!(handle.as_ref().reuc_entry_count(), 1);
-    for data in [&b""[..], b"x", &[0; 70_000][..]] {
-        handle
-            .add_from_buffer(blob(c"g", 1).as_ref(), data)
-            .unwrap();
-        let lent = handle.entry_by_path(c"g", Stage::Normal).unwrap();
-        assert_eq!(lent.file_size() as usize, data.len());
-        assert_eq!(
-            lent.id().raw_kind(),
-            u8::try_from(OidType::Sha1.raw()).unwrap()
-        );
-    }
-    let link = entry(c"l", 0, 1, 0, FileMode::Link);
-    handle.add_from_buffer(link.as_ref(), b"target").unwrap();
-    for mode in [FileMode::Commit, FileMode::Tree] {
-        let refused = entry(c"m", 0, 1, 0, mode);
-        assert_eq!(
-            handle
-                .add_from_buffer(refused.as_ref(), b"")
-                .unwrap_err()
-                .raw_code(),
-            -1
-        );
-    }
-    assert_eq!(
-        handle
-            .add_from_buffer(blob(c".git/x", 0).as_ref(), b"")
-            .unwrap_err()
-            .raw_code(),
-        -1
-    );
-    // A blob that cannot be written: its loose object's directory is a file.
-    let other = Scratch::new("entries-owned-other");
-    let id = create_from_buffer(work_repo(&other).as_ref(), b"unwritable").unwrap();
-    let hex = id.as_ref().to_hex_string().unwrap();
-    std::fs::write(scratch.0.join(".git/objects").join(&hex[..2]), b"").unwrap();
-    let error = handle.add_from_buffer(blob(c"u", 0).as_ref(), b"unwritable");
-    assert!(error.unwrap_err().raw_code() < 0);
-    assert!(handle.entry_by_path(c"u", Stage::Normal).is_none());
-    drop(index);
-    drop(repo);
-}
-
-/// `data` longer than libgit2's `u32` file size is refused before it is read; a lazily
-/// zeroed allocation costs no memory.
-#[test]
-#[cfg_attr(miri, ignore = "calls libgit2")]
-fn oversized_buffers_are_refused_unread() {
-    init();
-    let scratch = Scratch::new("entries-oversized");
-    let repo = work_repo(&scratch);
-    let mut index = repository_index_box(&repo);
-    let data = vec![0u8; u32::MAX as usize + 1];
-    let error = index
-        .as_mut()
-        .add_from_buffer(blob(c"big", 0).as_ref(), &data)
-        .unwrap_err();
-    assert_eq!(
-        (error.raw_code(), error.message()),
-        (-1, c"buffer is too large")
-    );
-    assert_eq!(index.as_ref().entry_count(), 0);
-    // Without an owner, nothing is read either.
-    let mut unowned = Index::new().unwrap();
-    let error = unowned
-        .as_mut()
-        .add_from_buffer(blob(c"big", 0).as_ref(), &data)
-        .unwrap_err();
-    assert_eq!(error.raw_code(), -1);
-}
-
 /// Reading trees frees every previous entry, conflict and record once; reading a tree
 /// whose subtree is gone, or one of another repository and object id type, leaves
 /// nothing behind; a populated index keeps the metadata of matching entries.
@@ -538,54 +414,6 @@ fn failed_tree_reads_after_entries_leave_the_index_as_it_was() {
             drop(repo);
         },
     );
-}
-
-/// Snapshot copies outlive later steps, the index's changes behind the snapshot (an
-/// entry replaced in place, removed, the index cleared) and the index itself; a
-/// drained iterator stays drained. `BSan` targets this test.
-#[test]
-#[cfg_attr(miri, ignore = "calls libgit2")]
-fn snapshot_copies_outlive_index_changes_and_the_index() {
-    init();
-    let index: IndexArc = Index::new().unwrap().into();
-    for (n, path) in [c"b", c"a", c"c/d"].into_iter().enumerate() {
-        add_staged(&index, path, 0, 1, u8::try_from(n).unwrap() + 1, 0o100_644);
-    }
-    let mut iterator = IndexIterator::new(&index).unwrap();
-    let mut steps = iterator.as_mut();
-    let first: IndexEntryBuf = steps.next().unwrap();
-    // Replaced in place, behind the snapshot.
-    add_staged(&index, c"b", 0, 1, 0x7F, 0o100_755);
-    add_staged(&index, c"new", 0, 1, 1, 0o100_644);
-    let second = steps.next().unwrap();
-    assert_eq!(second.as_ref().path(), c"b");
-    assert_eq!(second.as_ref().id().id()[0], 0x7F);
-    drop(index);
-    let rest: Vec<_> = iterator.as_mut().collect();
-    assert_eq!(rest.len(), 1);
-    assert_eq!(rest[0].path(), c"c/d");
-    assert!(iterator.as_mut().next().is_none());
-    assert!(iterator.as_mut().next().is_none());
-    drop(iterator);
-    assert_eq!(first.as_ref().path(), c"a");
-    assert_eq!(first.as_ref().id().id()[0], 2);
-    assert_eq!(first.clone(), first);
-
-    // Removed and cleared entries stay in the snapshot until it goes.
-    let mut sole = Index::new().unwrap();
-    for path in [c"x", c"y"] {
-        sole.as_mut().add(blob(path, 1).as_ref()).unwrap();
-    }
-    let index: IndexArc = sole.into();
-    let mut iterator = IndexIterator::new(&index).unwrap();
-    let x = iterator.as_mut().next().unwrap();
-    let mut other = IndexIterator::new(&index).unwrap();
-    drop(index);
-    let y = iterator.as_mut().next().unwrap();
-    assert_eq!((x.path(), y.path()), (c"x", c"y"));
-    drop(iterator);
-    let paths: Vec<_> = other.as_mut().map(|e| e.path().to_owned()).collect();
-    assert_eq!(paths, [c"x".to_owned(), c"y".to_owned()]);
 }
 
 /// Conflicts outlive their cursor while the index stays borrowed; cursors over the

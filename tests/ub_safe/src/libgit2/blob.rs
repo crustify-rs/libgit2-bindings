@@ -270,16 +270,14 @@ mod owner {
     use libgit2::libgit2::src::libgit2::repository::{Repository, RepositoryError};
     use libgit2::libgit2::src::util::errors::{ErrorClass, ErrorCode};
 
-    use crate::fixture::blob::set_blob_cache_limit;
-
     /// A copy of the content of the blob an owner holds.
     fn content(blob: &BlobArc<'_>) -> Vec<u8> {
         blob.as_ref().content().to_vec()
     }
+    use crate::fixture::TempRepo;
     use crate::fixture::object_and_tree_entry::{
-        object_view, open_testrepo, repository, set_cache_max_size, write_raw,
+        object_view, open_testrepo, repository, write_raw,
     };
-    use crate::fixture::{TempRepo, isolated};
 
     const COMMIT: &str = "a65fedf39aefe402d3bb6e24df4d4f5fe4547750";
     const TREE: &str = "944c0f6e4dfa41595e6eb3ceecdb14f50fe18162";
@@ -519,46 +517,6 @@ mod owner {
         for (data, blob) in blobs.iter().rev() {
             assert_eq!(content(blob), *data);
         }
-    }
-
-    /// With blobs cached, every lookup of one id shares the cache's blob, and owners
-    /// keep blobs the cache evicts under them (a one-byte cache limit).
-    #[test]
-    #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn cached_blobs_are_shared_and_outlive_eviction() {
-        isolated(
-            concat!(
-                module_path!(),
-                "::cached_blobs_are_shared_and_outlive_eviction"
-            ),
-            || {
-                let repo = open_testrepo();
-                set_blob_cache_limit(1 << 20);
-                let r = repo.as_ref();
-                let first = Blob::lookup(r, id(README).as_ref()).unwrap();
-                let second = Blob::lookup_prefix(r, id(README).as_ref(), 8).unwrap();
-                assert!(BlobArc::ptr_eq(&first, &second));
-                let mut first = first;
-                assert!(first.get_mut().is_none());
-                drop((first, second));
-
-                set_cache_max_size(1);
-                for round in 0..4 {
-                    let held: Vec<_> = BLOBS
-                        .iter()
-                        .map(|(h, _)| Blob::lookup(r, id(h).as_ref()).unwrap())
-                        .collect();
-                    let clones: Vec<_> = held.iter().rev().map(BlobArc::clone).collect();
-                    for (blob, (_, data)) in held.iter().zip(BLOBS) {
-                        assert_eq!(content(blob), data, "round {round}");
-                    }
-                    drop(held);
-                    for (blob, (_, data)) in clones.iter().rev().zip(BLOBS) {
-                        assert_eq!(content(blob), data, "round {round}");
-                    }
-                }
-            },
-        );
     }
 }
 
@@ -1149,7 +1107,6 @@ mod reading {
     use libgit2::libgit2::src::libgit2::oid::{Oid, OidType};
     use libgit2::libgit2::src::libgit2::repository::Repository;
 
-    use crate::fixture::blob::set_blob_cache_limit;
     use crate::fixture::object_and_tree_entry::repository;
     use crate::fixture::{TempRepo, init, isolated};
 
@@ -1221,44 +1178,6 @@ mod reading {
             let content = copy.as_ref().content();
             drop(clone);
             assert_eq!(content, &data[..]);
-        }
-    }
-
-    /// With blobs cached, lookups share one blob: its content stays readable through the
-    /// last holder, whichever goes first, and through the cache's own reference.
-    #[test]
-    #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn shared_cached_blobs_lend_their_content() {
-        isolated(
-            concat!(module_path!(), "::shared_cached_blobs_lend_their_content"),
-            shared_cached_blobs_lend_their_content_body,
-        );
-    }
-
-    fn shared_cached_blobs_lend_their_content_body() {
-        init();
-        set_blob_cache_limit(1 << 20);
-        let temp = TempRepo::new("blob-read-cached");
-        let repo = repository(&temp);
-        let data = bytes(5000, None);
-        let id = create_from_buffer(repo, &data).unwrap();
-        for order in 0..3 {
-            let holders: Vec<_> = (0..3)
-                .map(|_| Blob::lookup(repo, id.as_ref()).unwrap())
-                .collect();
-            let mut holders: Vec<_> = holders.into_iter().map(Some).collect();
-            for k in 0..3 {
-                let i = (k + order) % 3;
-                let blob = holders[i].take().unwrap();
-                assert_eq!(blob.as_ref().content(), &data[..]);
-                drop(blob);
-                for other in holders.iter().flatten() {
-                    assert_eq!(other.as_ref().content(), &data[..]);
-                    assert_eq!(other.as_ref().id().id()[..20], id.as_ref().id()[..20]);
-                }
-            }
-            let again = Blob::lookup(repo, id.as_ref()).unwrap();
-            assert_eq!(again.as_ref().content(), &data[..]);
         }
     }
 

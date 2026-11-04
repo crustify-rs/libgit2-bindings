@@ -20,7 +20,7 @@ use libgit2::libgit2::src::libgit2::strarray::{
     Iter, StrArray, StrArrayMut, StrArrayRef, StrArrayVal, StrArrayView,
 };
 
-use crate::fixture::{isolated, set_extensions};
+use crate::fixture::isolated;
 
 /// `n` distinct strings of lengths 0, 1, 2, ..., so each allocation's size differs.
 fn strings(n: usize) -> Vec<CString> {
@@ -311,42 +311,4 @@ fn arrays_shared_and_moved_across_threads() {
             .unwrap()
     });
     assert_eq!(contents(copy.as_ref()), expected(&view_src));
-}
-
-/// libgit2's own results under every edit: a vector's array with spare capacity, and
-/// an allocated empty one when every builtin is disabled. Alone in a child, since the
-/// extension list is process-global.
-#[test]
-#[cfg_attr(miri, ignore = "calls libgit2")]
-fn libgit2_results_edit_and_release() {
-    isolated(
-        concat!(module_path!(), "::libgit2_results_edit_and_release"),
-        || {
-            set_extensions(&[c"zeta", c"alpha", c"!noop"]);
-            let mut ext = settings::extensions().unwrap();
-            let names = contents(ext.as_ref());
-            assert!(names.contains(&b"zeta".to_vec()) && !names.contains(&b"noop".to_vec()));
-            let copy = ext.as_ref().to_str_array().unwrap();
-            ext.as_mut().truncate(1);
-            assert_eq!(contents(ext.as_ref()), names[..1]);
-            assert_eq!(contents(copy.as_ref()), names);
-
-            set_extensions(&[
-                c"!noop",
-                c"!objectformat",
-                c"!worktreeconfig",
-                c"!preciousobjects",
-                c"!refstorage",
-                c"!relativeworktrees",
-            ]);
-            let mut none = settings::extensions().unwrap();
-            read_all(none.as_ref(), 0);
-            none.as_mut().truncate(0);
-            assert!(none.as_ref().to_str_array().unwrap().as_ref().is_empty());
-            let taken = none.as_mut().take_strings();
-            assert!(taken.is_empty() && !taken.as_ptr().is_null());
-            drop(taken);
-            drop(settings::extensions().unwrap());
-        },
-    );
 }

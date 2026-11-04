@@ -1850,12 +1850,11 @@ mod tree_object {
     use libgit2::libgit2::src::libgit2::tree::{Tree, TreeArc, TreeEntry, TreeRef};
     use libgit2::libgit2::src::util::errors::{ErrorClass, ErrorCode};
 
+    use crate::fixture::TempRepo;
     use crate::fixture::object_and_tree_entry::{
-        enable_caching, entry_view, object_view, open_testrepo, repository, set_cache_max_size,
-        write_raw,
+        entry_view, object_view, open_testrepo, repository, write_raw,
     };
     use crate::fixture::tree::entries;
-    use crate::fixture::{TempRepo, isolated};
 
     /// Trees of `testrepo.git`: `HEAD`'s, commit `763d71a`'s (nesting `ab/de/fgh`), its
     /// subtrees `ab`, `ab/c`, `ab/de` and `ab/de/fgh`, and more commits' trees.
@@ -2128,59 +2127,6 @@ mod tree_object {
         }
     }
 
-    /// With a cache limit of one byte, the cache evicts trees as fast as they come, while
-    /// owners still hold them: the owners' references keep them, and their entries,
-    /// alive.
-    #[test]
-    #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn owners_outlive_cache_eviction() {
-        isolated(
-            concat!(module_path!(), "::owners_outlive_cache_eviction"),
-            || {
-                let repo = open_testrepo();
-                set_cache_max_size(1);
-                for round in 0..4 {
-                    let held: Vec<_> = TREES
-                        .iter()
-                        .map(|h| Tree::lookup(repo.as_ref(), id(h).as_ref()).unwrap())
-                        .collect();
-                    let expected: Vec<_> = held.iter().map(entries).collect();
-                    let clones: Vec<_> = held.iter().rev().map(|t| t.as_ref().to_tree()).collect();
-                    drop(held);
-                    for (tree, e) in clones.iter().rev().zip(&expected) {
-                        assert_eq!(&entries(tree), e, "round {round}");
-                    }
-                }
-            },
-        );
-    }
-
-    /// With caching off, every lookup parses a fresh tree, which its owners alone count;
-    /// dropping the last frees it, with its entries and raw data.
-    #[test]
-    #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn without_a_cache_each_lookup_is_a_fresh_tree() {
-        isolated(
-            concat!(
-                module_path!(),
-                "::without_a_cache_each_lookup_is_a_fresh_tree"
-            ),
-            || {
-                let repo = open_testrepo();
-                enable_caching(false);
-                let first = Tree::lookup(repo.as_ref(), id(NESTED).as_ref()).unwrap();
-                let second = Tree::lookup_prefix(repo.as_ref(), id(NESTED).as_ref(), 8).unwrap();
-                assert!(!TreeArc::ptr_eq(&first, &second));
-                let expected = entries(&first);
-                let clone = first.clone();
-                drop(first);
-                assert_eq!(entries(&clone), expected);
-                drop(second);
-                assert_eq!(entries(&clone), expected);
-            },
-        );
-    }
-
     /// Each thread opens its own repository and looks its trees up, clones, converts and
     /// reads them: the shared machinery underneath must not race.
     #[test]
@@ -2263,11 +2209,9 @@ mod tree_reads {
     };
     use libgit2::libgit2::src::util::errors::{ErrorClass, ErrorCode, last};
 
-    use crate::fixture::object_and_tree_entry::{
-        entry_view, open_testrepo, repository, set_cache_max_size, write_raw,
-    };
+    use crate::fixture::TempRepo;
+    use crate::fixture::object_and_tree_entry::{entry_view, open_testrepo, repository, write_raw};
     use crate::fixture::tree::{entries, id};
-    use crate::fixture::{TempRepo, isolated};
 
     /// Trees of `testrepo.git`: `HEAD`'s, commit `763d71a`'s (nesting `ab/de/fgh`), its
     /// subtrees `ab`, `ab/c`, `ab/de` and `ab/de/fgh`, and more commits' trees.
@@ -2450,77 +2394,6 @@ mod tree_reads {
         let walked = tree.walk(mode, &mut callback).unwrap();
         drop(callback);
         (walked, visits)
-    }
-
-    /// Under a cache evicting as fast as trees come, a walk's subtrees are freed as soon
-    /// as walked: the closure copies what it keeps, walks the tree again from inside,
-    /// looks other trees up and drops clones of the walked tree. Stopping at every visit
-    /// in both orders ends the walk there; the copies outlive the walks.
-    #[test]
-    #[cfg_attr(miri, ignore = "calls libgit2")]
-    fn walks_lend_entries_for_the_call() {
-        isolated(
-            concat!(module_path!(), "::walks_lend_entries_for_the_call"),
-            || {
-                let repo = open_testrepo();
-                set_cache_max_size(1);
-                let tree = Tree::lookup(repo.as_ref(), sha1(NESTED).as_ref()).unwrap();
-                let mut kept = Vec::new();
-                for mode in [WalkMode::PreOrder, WalkMode::PostOrder] {
-                    let (walked, all) =
-                        walk_copying(tree.as_ref(), mode, |_, _| WalkAction::Continue);
-                    assert_eq!(walked, ControlFlow::Continue(()));
-                    assert!(all.iter().any(|(p, _)| p == "ab/de/fgh/1.txt"));
-                    for stop in 0..all.len() {
-                        let mut n = 0;
-                        let (walked, visits) = walk_copying(tree.as_ref(), mode, |_, _| {
-                            n += 1;
-                            if n > stop {
-                                WalkAction::Stop
-                            } else {
-                                WalkAction::Continue
-                            }
-                        });
-                        assert_eq!(walked, ControlFlow::Break(()));
-                        assert_eq!(visits.len(), stop + 1);
-                        kept.extend(visits);
-                    }
-                    kept.extend(all);
-                }
-
-                // From inside: a nested walk of the same tree, lookups and clones.
-                let mut inner_visits = 0;
-                let mut outer = |root: &CStr, entry: TreeEntryRef<'_>| {
-                    let clone = tree.clone();
-                    let mut inner = |r: &CStr, e: TreeEntryRef<'_>| {
-                        inner_visits += 1;
-                        drop(path_of(r, e));
-                        WalkAction::Skip
-                    };
-                    let mut nested = WalkCallback::new(&mut inner);
-                    let walked = clone.as_ref().walk(WalkMode::PreOrder, &mut nested);
-                    assert_eq!(walked.unwrap(), ControlFlow::Continue(()));
-                    drop(clone);
-                    if entry.kind() == ObjectType::Tree {
-                        let sub = Tree::lookup(repo.as_ref(), entry.id()).unwrap();
-                        assert_eq!(sub.as_ref().id().id(), entry.id().id());
-                        assert!(!sub.as_ref().is_empty());
-                    }
-                    drop(path_of(root, entry));
-                    WalkAction::Continue
-                };
-                let mut callback = WalkCallback::new(&mut outer);
-                let walked = tree.as_ref().walk(WalkMode::PostOrder, &mut callback);
-                assert_eq!(walked.unwrap(), ControlFlow::Continue(()));
-                drop(callback);
-                assert!(inner_visits > 0);
-                drop(tree);
-                drop(repo);
-                for (path, entry) in &kept {
-                    assert!(path.ends_with(entry.as_ref().name().to_str().unwrap()));
-                }
-            },
-        );
     }
 
     /// A panic of the closure stops the walk, resumes once libgit2 has returned, and

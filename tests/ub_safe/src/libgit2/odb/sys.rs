@@ -10,7 +10,7 @@ use libgit2::libgit2::src::libgit2::odb::{
     OdbDataArrayFree, OdbDataBox, OdbDataStr, OdbDataStrFree, OdbDataStrVec, OdbDataVec,
 };
 
-use crate::fixture::{Pair, filled, isolated};
+use crate::fixture::{Pair, isolated};
 
 /// Up to just past a page; whole-slice comparisons keep `BSan`'s per-access cost low.
 const SIZES: [usize; 7] = [1, 2, 7, 16, 63, 4096, 4097];
@@ -77,25 +77,6 @@ fn vec_uninit_may_drop_partially_filled() {
 
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
-fn vec_uninit_clones_as_bytes_before_promotion() {
-    // `MaybeUninit<u32>` is `Copy`, so a buffer still being filled clones as bytes
-    // without reading any element as a `u32`; the copy is promoted on its own.
-    let mut v = OdbDataArrayFree::new_uninit::<u32>(16).unwrap();
-    v.as_mut_slice()[15].write(0x1234_5678);
-    let half = v.clone();
-    assert_eq!(half.len(), 16);
-    drop(half);
-    for (i, slot) in v.as_mut_slice().iter_mut().enumerate() {
-        slot.write(u32::try_from(i).unwrap());
-    }
-    let w = v.clone();
-    drop(v);
-    let w = filled(w);
-    assert_eq!(w.as_slice(), &(0..16).collect::<Vec<u32>>()[..]);
-}
-
-#[test]
-#[cfg_attr(miri, ignore = "calls libgit2")]
 fn vec_storage_aligns_wide_elements() {
     let v = OdbDataVec::<u64>::from_slice(&[1, 2, 3]).unwrap();
     assert_eq!(v.as_ptr() as usize % align_of::<u64>(), 0);
@@ -123,75 +104,11 @@ fn vec_rejects_oversized_requests_without_panicking() {
 
 #[test]
 #[cfg_attr(miri, ignore = "calls libgit2")]
-fn box_zeroed_reads_zero_then_takes_writes() {
-    let mut pair = OdbDataBox::<Pair>::new_zeroed().unwrap();
-    assert_eq!((pair.as_ref().a(), pair.as_ref().b()), (0, 0));
-    pair.as_mut().set(u64::MAX, u32::MAX);
-    let shared = pair.as_ref();
-    assert_eq!((shared.a(), shared.b()), (u64::MAX, u32::MAX));
-}
-
-#[test]
-#[cfg_attr(miri, ignore = "calls libgit2")]
 fn box_uninit_may_drop_unfilled() {
     for _ in 0..64 {
         let mut slot = OdbDataBox::<Pair>::new_uninit().unwrap();
         assert!(!slot.as_c_ptr().is_null());
     }
-}
-
-#[test]
-#[cfg_attr(miri, ignore = "calls libgit2")]
-fn owners_cross_threads() {
-    let src = pattern(4096);
-    let v = OdbDataVec::<u8>::from_slice(&src).unwrap();
-    thread::scope(|s| {
-        for _ in 0..4 {
-            // Shared reads and copies of one buffer from several threads at once.
-            s.spawn(|| {
-                let copy = v.clone();
-                assert_eq!(copy.as_slice(), v.as_slice());
-            });
-        }
-    });
-    // Allocated here, freed on another thread.
-    thread::spawn(move || assert_eq!(v.as_slice(), &src[..]))
-        .join()
-        .unwrap();
-
-    let handles: Vec<_> = (0..4u32)
-        .map(|i| {
-            thread::spawn(move || {
-                let mut pair = OdbDataBox::<Pair>::new_zeroed().unwrap();
-                pair.as_mut().set(u64::from(i), i);
-                pair
-            })
-        })
-        .collect();
-    for (i, h) in handles.into_iter().enumerate() {
-        let pair = h.join().unwrap();
-        assert_eq!(pair.as_ref().b(), u32::try_from(i).unwrap());
-    }
-}
-
-#[test]
-#[cfg_attr(miri, ignore = "calls libgit2")]
-fn owners_work_before_any_init() {
-    isolated(
-        concat!(module_path!(), "::owners_work_before_any_init"),
-        || {
-            // Nothing has initialised libgit2: an unpinned allocation would fail through
-            // libgit2's `failalloc` and write the OOM through a nonexistent TLS key.
-            let v = OdbDataVec::<u8>::from_slice(b"first").unwrap();
-            let w = v.clone();
-            drop(v);
-            assert_eq!(w.as_slice(), b"first");
-            let z = OdbDataArrayFree::new_zeroed::<u32>(8).unwrap();
-            assert_eq!(z.as_slice(), &[0; 8]);
-            let pair = OdbDataBox::<Pair>::new_zeroed().unwrap();
-            assert_eq!(pair.as_ref().a(), 0);
-        },
-    );
 }
 
 #[test]
