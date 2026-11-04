@@ -755,7 +755,8 @@ Deterministic `ffimap`; no model.
 | `libgit2/src/libgit2/indexer.c` | `179` | `0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+1` | `+0` | `+0` | `1` |
 | `libgit2/src/libgit2/checkout.c` | `331` | `1` | `+0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+1` | `1` |
 | `libgit2/src/libgit2/checkout.c` | `333` | `0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+2` | `2` |
-| **Σ** |  |  | **`+1`** | **`+5`** | **`+3`** | **`+1`** | **`+3`** | **`+5`** | **`+11`** | **`+50`** | **`79`** |
+| — (`tests/ub_safe`) | `526` | `0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+1` | `1` |
+| **Σ** |  |  | **`+1`** | **`+5`** | **`+3`** | **`+1`** | **`+3`** | **`+5`** | **`+11`** | **`+51`** | **`80`** |
 
 ## Notes
 
@@ -881,6 +882,14 @@ The `raw-lifetime-void` batch relaxed `tests/ub_safe/main.rs` from the scaffolde
 with `unsafe`, for safe constructors the crate does not have yet; the review did not flag it.
 It is an open departure from the `ub_safe` contract, left in place until the constructors
 it stands in for are wrapped.
+
+Review wave `526` (`reviewer/run-132`, outside `schedule.json`, at the user's request) moved the
+fixture onto the wrappers that had landed since: of the 51 FFI functions it called, 17 are
+gone, and its `unsafe` blocks went from 117 to 92. Six of the 23 functions with wrappers stay
+raw, each for a form the wrappers do not offer, as its docs say: a C blob stream lent as a
+`WriteStreamBox`, a caller-owned `git_buf` that the option getters fill, and an exclusive
+handle to a repository's shared index. The other 28 have no wrapper yet. See
+`crustify/reviews/wave-526/batch-0/misc/ub-safe-fixture-outlives-its-safe-constructors/`.
 
 ### BSan skips the compile-fail suite
 

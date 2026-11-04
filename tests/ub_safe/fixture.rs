@@ -11,6 +11,7 @@ use std::process::Command;
 
 use ffibox::{CMutSeam, CRefSeam};
 use libgit2::libgit2::src::libgit2::odb::OdbDataVec;
+use libgit2::libgit2::src::libgit2::oid::{Oid, OidRef};
 
 const CHILD: &str = "CRUSTIFY_UB_SAFE_CHILD";
 
@@ -90,6 +91,24 @@ impl PairMut<'_> {
         let b_ptr = unsafe { core::ptr::addr_of_mut!((*p).b) };
         // SAFETY: as above.
         unsafe { b_ptr.write(b) };
+    }
+}
+
+/// `id` as an [`Oid`], copied through the safe setters.
+pub(crate) fn oid_of(id: &ffi::git_oid) -> Oid {
+    let mut oid = <Oid as ffibox::CZeroable>::zeroed();
+    let mut handle = oid.as_mut();
+    handle.set_raw_kind(id.type_);
+    handle.set_id(id.id);
+    oid
+}
+
+/// `id` as a raw `git_oid`, copied through the safe getters, for the fixtures and tests
+/// that keep raw ids.
+pub(crate) fn raw_oid(id: OidRef<'_>) -> ffi::git_oid {
+    ffi::git_oid {
+        type_: id.raw_kind(),
+        id: id.id(),
     }
 }
 
@@ -180,7 +199,7 @@ pub(crate) fn install(allocator: &Allocator) {
     // SAFETY: `allocator` is a coherent family (an `Allocator::new` value over an
     // `Alloc` implementation); live blocks stay releasable and no other thread calls
     // libgit2 meanwhile, per this function's contract.
-    unsafe { libgit2::libgit2::src::libgit2::settings::set_allocator(Some(allocator.as_ref())) }
+    unsafe { settings::set_allocator(Some(allocator.as_ref())) }
 }
 
 // --- `git2/types.h`: `git_writestream` ---------------------------------------------
@@ -190,10 +209,11 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use libgit2::libgit2::src::libgit2::filter::{
-    RustWriteStream, StreamError, StreamWriter, WriteStreamBox,
+    FilterList, FilterListBox, RustWriteStream, StreamError, StreamWriter, WriteStreamBox,
 };
 use libgit2::libgit2::src::libgit2::repository::{Repository, RepositoryBox};
-use libgit2::libgit2::src::util::errors::{ErrorCode, last};
+use libgit2::libgit2::src::util::errors;
+use libgit2::libgit2::src::util::errors::{ErrorClass, ErrorCode, last};
 
 /// Takes a `git_libgit2_init` reference that is never released.
 pub(crate) fn init() {
@@ -276,6 +296,8 @@ pub(crate) fn blob_stream(repo: &TempRepo, hint: Option<&CStr>) -> WriteStreamBo
 }
 
 /// `git_blob_create_from_stream_commit`, which consumes the stream: the new blob's id.
+/// Raw for the reason [`blob_stream`] is: its wrapper, `BlobWriter::commit`, commits only
+/// a writer, never a stream adopted as a `WriteStreamBox`.
 pub(crate) fn commit_blob(stream: WriteStreamBox) -> Result<Vec<u8>, c_int> {
     let mut oid = ffi::git_oid::default();
     // SAFETY: an open blob stream (only ever written, never closed), whose ownership
@@ -297,35 +319,29 @@ pub(crate) enum Filters {
     Refused,
 }
 
-/// A fresh list holding the filter, or NULL for none.
-fn filter_list(filters: Filters) -> *mut ffi::git_filter_list {
+/// A fresh list over `repo` holding the filter, through [`FilterList::new`], or `None`
+/// for none. The filter is pushed raw: `git_filter_list_push` has no wrapper yet.
+fn filter_list(repo: &RepositoryBox, filters: Filters) -> Option<FilterListBox<'_>> {
     let filter = match filters {
-        Filters::None => return core::ptr::null_mut(),
+        Filters::None => return None,
         // SAFETY: a NUL-terminated name; the registry outlives the call.
         Filters::IdentClean => unsafe { ffi::git_filter_lookup(c"ident".as_ptr()) },
         Filters::Upper => upper_filter(),
         Filters::Refused => refused_filter(),
     };
     assert!(!filter.is_null());
-    let mut list = core::ptr::null_mut();
-    // SAFETY: a live slot; no repository is needed by these filters.
-    let rc = unsafe {
-        ffi::git_filter_list_new(
-            &raw mut list,
-            core::ptr::null_mut(),
-            ffi::GIT_FILTER_TO_ODB,
-            0,
-        )
-    };
+    let list = FilterList::new(repo.as_ref(), ffi::GIT_FILTER_TO_ODB, 0).unwrap();
+    // SAFETY: the fresh list, which nothing else references, and a registered filter
+    // that lives for the process, with no payload.
+    let rc = unsafe { ffi::git_filter_list_push(list.as_c_ptr(), filter, core::ptr::null_mut()) };
     assert_eq!(rc, 0);
-    // SAFETY: a fresh list and a registered filter, with no payload.
-    let rc = unsafe { ffi::git_filter_list_push(list, filter, core::ptr::null_mut()) };
-    assert_eq!(rc, 0);
-    list
+    Some(list)
 }
 
 /// `git_filter_list_stream_buffer(filters, data, target)`, standing in for the filter
-/// wrapper: libgit2 writes into the target and closes it, and never frees it.
+/// wrapper: libgit2 writes into the target and closes it, and never frees it. The list
+/// is built over a repository without paths ([`Repository::new`]), which
+/// [`FilterList::new`] needs and none of these filters reads.
 ///
 /// libgit2 initialises a filter on its first push without a lock (`filter.c` reads and
 /// writes `fdef->initialized` outside the registry lock), so concurrent first pushes
@@ -334,25 +350,22 @@ pub(crate) fn stream_buffer(filters: Filters, data: &[u8], target: &mut WriteStr
     static PRIMED: OnceLock<()> = OnceLock::new();
     init();
     PRIMED.get_or_init(|| {
+        let repo = Repository::new().unwrap();
         for filters in [Filters::IdentClean, Filters::Upper, Filters::Refused] {
-            // SAFETY: the fresh list, freed once.
-            unsafe { ffi::git_filter_list_free(filter_list(filters)) };
+            drop(filter_list(&repo, filters));
         }
     });
-    let list = filter_list(filters);
-    // SAFETY: `list` is NULL or the live list above; `data` is live for the call; the
-    // target is an open stream the caller owns, which the call writes and closes.
-    let rc = unsafe {
-        ffi::git_filter_list_stream_buffer(
-            list,
-            data.as_ptr().cast(),
-            data.len(),
-            target.as_c_ptr(),
-        )
-    };
-    // SAFETY: the list above, or NULL, which libgit2 accepts.
-    unsafe { ffi::git_filter_list_free(list) };
-    rc
+    let repo = Repository::new().unwrap();
+    let list = filter_list(&repo, filters);
+    let raw = list
+        .as_ref()
+        .map_or(core::ptr::null_mut(), FilterListBox::as_c_ptr);
+    // SAFETY: `raw` is NULL, which libgit2 accepts, or the live list above, whose
+    // repository outlives it; `data` is live for the call; the target is an open stream
+    // the caller owns, which the call writes and closes.
+    unsafe {
+        ffi::git_filter_list_stream_buffer(raw, data.as_ptr().cast(), data.len(), target.as_c_ptr())
+    }
 }
 
 /// A stream writing upper-cased data into the next stream of a filter chain, and
@@ -467,8 +480,7 @@ unsafe extern "C" fn refused_stream(
     _source: *const ffi::git_filter_source,
     _next: *mut ffi::git_writestream,
 ) -> c_int {
-    // SAFETY: a live message, which libgit2 copies; the runtime is initialised.
-    unsafe { ffi::git_error_set_str(ffi::GIT_ERROR_FILTER.cast_signed(), c"refused".as_ptr()) };
+    errors::set_str(ErrorClass::Filter, c"refused").unwrap();
     ffi::GIT_EUSER
 }
 
@@ -489,33 +501,39 @@ pub(crate) fn refused_filter() -> *mut ffi::git_filter {
 pub(crate) fn set_extensions(names: &[&CStr]) {
     // SAFETY: callers run alone in an isolated child, so no other thread calls into
     // libgit2 while the setting changes.
-    unsafe { libgit2::libgit2::src::libgit2::settings::set_extensions(names) }.unwrap();
+    unsafe { settings::set_extensions(names) }.unwrap();
 }
 
 // --- `git2/buffer.h` ---------------------------------------------------------------
 
 use libgit2::libgit2::src::libgit2::buf::{Buf, BufVal};
+use libgit2::libgit2::src::libgit2::settings;
 
 /// Sets a string option of `git_libgit2_opts` (`GIT_OPT_SET_USER_AGENT`,
-/// `GIT_OPT_SET_TEMPLATE_PATH`); NULL restores the default. Stands in for the
-/// `git_libgit2_opts` wrapper (`core`), which replaces it.
+/// `GIT_OPT_SET_TEMPLATE_PATH`) through its unsafe wrapper
+/// ([`settings::set_user_agent`], [`settings::set_template_path`]); `None` restores the
+/// default. Process-global: call it in an isolated child, single-threaded.
 ///
 /// The options need an initialised libgit2: this takes a reference of its own, which
 /// the process keeps.
 pub(crate) fn set_str_option(option: u32, value: Option<&CStr>) {
-    // SAFETY: no arguments; libgit2 counts initialisations under its own lock.
-    assert!(unsafe { ffi::git_libgit2_init() } > 0);
-    let value = value.map_or(core::ptr::null(), CStr::as_ptr);
-    // SAFETY: the string options copy their `const char *`, or restore their default
-    // for NULL.
-    let ret = unsafe { ffi::git_libgit2_opts(option.cast_signed(), value) };
-    assert_eq!(ret, 0);
+    init();
+    let set = match option {
+        ffi::GIT_OPT_SET_USER_AGENT => settings::set_user_agent,
+        ffi::GIT_OPT_SET_TEMPLATE_PATH => settings::set_template_path,
+        _ => panic!("{option} is no string option this fixture sets"),
+    };
+    // SAFETY: callers run alone in an isolated child, so no other thread calls into
+    // libgit2 while the setting changes.
+    unsafe { set(value) }.unwrap();
 }
 
 /// Has libgit2 fill `buf` through a `GIT_OPT_GET_*` option taking a `git_buf *`
 /// (`GIT_OPT_GET_USER_AGENT`, `GIT_OPT_GET_TEMPLATE_PATH`), reusing what it owns, and
-/// adopts the result. Stands in for the `git_libgit2_opts` wrapper (`core`) and the
-/// other routines returning a `git_buf`, which replace it.
+/// adopts the result. Stays raw: the getters' wrappers ([`settings::user_agent`],
+/// [`settings::template_path`]) return a fresh `CString`, never filling a caller's
+/// buffer, and the tests check how a `Buf` survives libgit2 reusing and replacing its
+/// allocation.
 pub(crate) fn fill_from_option(option: u32, buf: &mut BufVal) {
     let mut raw = buf.as_mut().take().into_inner().into_raw();
     // SAFETY: the `GET` options taking a `git_buf *` accept one that is zeroed or owns
@@ -662,14 +680,15 @@ pub(crate) mod commit_and_config {
 // --- `git2/commit.h`: `git_commit_create_ext_options` ---------------------------------
 
 /// Commit creation through the `git_commit_create_ext` wrapper, reading the commit back
-/// through C, which stands in for the object database's read wrapper.
+/// through the object database's read wrapper.
 pub(crate) mod create_ext {
-    use std::ffi::{CStr, CString, c_int};
+    use std::ffi::{CStr, c_int};
     use std::ptr;
 
     use libgit2::ffi;
     use libgit2::libgit2::src::libgit2::commit::{CreateExtOptions, create_ext};
     use libgit2::libgit2::src::libgit2::oid::{Oid, OidType};
+    use libgit2::libgit2::src::libgit2::refs::ReferenceBox;
     use libgit2::libgit2::src::libgit2::signature::{SignatureView, Time};
     use libgit2::libgit2::src::libgit2::tree::Tree;
 
@@ -697,52 +716,22 @@ pub(crate) mod create_ext {
             Some(options.as_mut()),
         )
         .map_err(|e| e.raw_code())?;
-        let hex = CString::new(id.as_ref().to_hex_string().unwrap()).unwrap();
-        let (mut raw, mut odb, mut obj) =
-            (ffi::git_oid::default(), ptr::null_mut(), ptr::null_mut());
-        {
-            // SAFETY: the commit just written is read back by its id and copied; each object
-            // is released once.
-            unsafe {
-                assert_eq!(
-                    ffi::git_oid_from_string(&raw mut raw, hex.as_ptr(), ffi::GIT_OID_SHA1),
-                    0
-                );
-            };
-            // SAFETY: as above.
-            unsafe { assert_eq!(ffi::git_repository_odb(&raw mut odb, repo.raw()), 0) };
-            // SAFETY: as above.
-            unsafe { assert_eq!(ffi::git_odb_read(&raw mut obj, odb, &raw const raw), 0) };
-            // SAFETY: as above.
-            let odb_object_data = unsafe { ffi::git_odb_object_data(obj) };
-            // SAFETY: as above.
-            let odb_object_size = unsafe { ffi::git_odb_object_size(obj) };
-            // SAFETY: as above.
-            let data = unsafe {
-                std::slice::from_raw_parts(odb_object_data.cast::<u8>(), odb_object_size)
-            };
-            let text = String::from_utf8(data.to_vec()).unwrap();
-            // SAFETY: as above.
-            unsafe { ffi::git_odb_object_free(obj) };
-            // SAFETY: as above.
-            unsafe { ffi::git_odb_free(odb) };
-            Ok(text)
-        }
+        let object = r.odb().unwrap().as_ref().read(id.as_ref()).unwrap();
+        Ok(String::from_utf8(object.as_ref().data().to_vec()).unwrap())
     }
 
-    /// Whether the reference `name` of `repo` exists.
+    /// Whether the reference `name` of `repo` exists: raw `git_reference_lookup`, which
+    /// has no wrapper yet, its result adopted and released by a [`ReferenceBox`].
     pub(crate) fn has_reference(repo: &TempRepo, name: &CStr) -> bool {
         let mut reference = ptr::null_mut();
-        {
-            // SAFETY: a live repository and a NUL-terminated name; the reference is
-            // released once.
-            let found = unsafe {
-                ffi::git_reference_lookup(&raw mut reference, repo.raw(), name.as_ptr()) == 0
-            };
-            // SAFETY: as above.
-            unsafe { ffi::git_reference_free(reference) };
-            found
-        }
+        // SAFETY: a live slot, set only on success, the live repository and a
+        // NUL-terminated name.
+        let rc =
+            unsafe { ffi::git_reference_lookup(&raw mut reference, repo.raw(), name.as_ptr()) };
+        // SAFETY: NULL, or a fresh attached reference the caller owns, released by
+        // `git_reference_free` when the box drops, here, while `repo` lives.
+        let found = unsafe { ReferenceBox::from_c(reference) };
+        rc == 0 && found.is_some()
     }
 }
 
@@ -1303,6 +1292,7 @@ pub(crate) mod annotated_commit {
 
     use libgit2::ffi;
     use libgit2::libgit2::src::libgit2::annotated_commit::AnnotatedCommitBox;
+    use libgit2::libgit2::src::libgit2::object::ObjectType;
     use libgit2::libgit2::src::libgit2::oid::OidType;
     use libgit2::libgit2::src::libgit2::refs::ReferenceBox;
     use libgit2::libgit2::src::libgit2::repository::{
@@ -1318,13 +1308,7 @@ pub(crate) mod annotated_commit {
 
     /// The hex form of `id`.
     pub(crate) fn hex(id: &ffi::git_oid) -> String {
-        let mut buf = [0; 65];
-        // SAFETY: `buf` holds 65 bytes, which bounds the write; `id` is a live oid.
-        unsafe { ffi::git_oid_tostr(buf.as_mut_ptr(), buf.len(), id) };
-        // SAFETY: `git_oid_tostr` NUL-terminates within `buf`.
-        unsafe { CStr::from_ptr(buf.as_ptr()) }
-            .to_string_lossy()
-            .into_owned()
+        super::oid_of(id).as_ref().to_hex_string().unwrap()
     }
 
     /// The commit id `commit` reads, as hex, and its reference name, through
@@ -1380,28 +1364,19 @@ pub(crate) mod annotated_commit {
             m.set_initial_head(Some(c"main"));
             m.set_oid_type(OidType::from_raw(kind));
             let repo = Repository::init_ext(&c_path, opts.as_mut()).unwrap();
-            let raw = repo.as_c_ptr();
-            let mut odb = ptr::null_mut();
-            // SAFETY: a live slot and the live repository; released below.
-            assert_eq!(unsafe { ffi::git_repository_odb(&raw mut odb, raw) }, 0);
-            let write = |data: &[u8], kind: ffi::git_object_t| {
-                let mut id = ffi::git_oid::default();
-                let rc =
-                    // SAFETY: a live slot, the live odb and `data` readable for its length
-                    // at a non-NULL address.
-                    unsafe { ffi::git_odb_write(&raw mut id, odb, data.as_ptr().cast(), data.len(), kind) };
-                assert_eq!(rc, 0);
-                id
+            let odb = repo.as_ref().odb().unwrap();
+            let write = |data: &[u8], kind: ObjectType| {
+                super::raw_oid(odb.as_ref().write(data, kind).unwrap().as_ref())
             };
             const WHO: &str = "A U Thor <author@example.com> 1700000000 +0000";
-            let tree = write(b"", ffi::GIT_OBJECT_TREE);
+            let tree = write(b"", ObjectType::Tree);
             let first = write(
                 format!(
                     "tree {}\nauthor {WHO}\ncommitter {WHO}\n\nfirst\n",
                     hex(&tree)
                 )
                 .as_bytes(),
-                ffi::GIT_OBJECT_COMMIT,
+                ObjectType::Commit,
             );
             let second = write(
                 format!(
@@ -1410,7 +1385,7 @@ pub(crate) mod annotated_commit {
                     hex(&first)
                 )
                 .as_bytes(),
-                ffi::GIT_OBJECT_COMMIT,
+                ObjectType::Commit,
             );
             let tag = write(
                 format!(
@@ -1418,10 +1393,9 @@ pub(crate) mod annotated_commit {
                     hex(&second)
                 )
                 .as_bytes(),
-                ffi::GIT_OBJECT_TAG,
+                ObjectType::Tag,
             );
-            // SAFETY: the odb reference taken above, released once.
-            unsafe { ffi::git_odb_free(odb) };
+            drop(odb);
             // References are written as loose files: `git_reference_create` takes a
             // reflog signature at the current time, whose glibc timezone lookup
             // ThreadSanitizer reports against other tests'.
@@ -1545,6 +1519,7 @@ pub(crate) mod worktree_add {
     use std::ptr;
 
     use libgit2::ffi;
+    use libgit2::libgit2::src::libgit2::object::ObjectType;
     use libgit2::libgit2::src::libgit2::refs::ReferenceBox;
     use libgit2::libgit2::src::libgit2::repository::{Repository, RepositoryBox};
     use libgit2::libgit2::src::libgit2::worktree::{AddOptions, Worktree, WorktreeBox};
@@ -1573,25 +1548,16 @@ pub(crate) mod worktree_add {
             let path = base.join("repo");
             let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
             let repo = Repository::init(&c_path, false).unwrap();
-            let (mut odb, raw) = (ptr::null_mut(), repo.as_c_ptr());
-            // SAFETY: a live slot and the live repository; released below.
-            let rc = unsafe { ffi::git_repository_odb(&raw mut odb, raw) };
-            assert_eq!(rc, 0);
-            let write = |data: &[u8], kind: ffi::git_object_t| {
-                let mut id = ffi::git_oid::default();
-                let (bytes, len) = (data.as_ptr().cast(), data.len());
-                // SAFETY: a live slot, the live odb and `data` readable for its length at
-                // a non-NULL address.
-                let rc = unsafe { ffi::git_odb_write(&raw mut id, odb, bytes, len, kind) };
-                assert_eq!(rc, 0);
-                super::annotated_commit::hex(&id)
+            let odb = repo.as_ref().odb().unwrap();
+            let write = |data: &[u8], kind: ObjectType| {
+                let id = odb.as_ref().write(data, kind).unwrap();
+                id.as_ref().to_hex_string().unwrap()
             };
             const WHO: &str = "A U Thor <author@example.com> 1700000000 +0000";
-            let tree = write(b"", ffi::GIT_OBJECT_TREE);
+            let tree = write(b"", ObjectType::Tree);
             let commit = format!("tree {tree}\nauthor {WHO}\ncommitter {WHO}\n\nfirst\n");
-            let commit = write(commit.as_bytes(), ffi::GIT_OBJECT_COMMIT);
-            // SAFETY: the odb reference taken above, released once.
-            unsafe { ffi::git_odb_free(odb) };
+            let commit = write(commit.as_bytes(), ObjectType::Commit);
+            drop(odb);
             // Loose files: `git_reference_create` would take a reflog signature at the
             // current time, whose timezone lookup TSan reports against other tests'.
             for name in [
@@ -1870,7 +1836,7 @@ pub(crate) mod object_and_tree_entry {
     use libgit2::ffi;
     use libgit2::libgit2::src::libgit2::blob::create_from_buffer;
     use libgit2::libgit2::src::libgit2::object::{Object, ObjectArc, ObjectType};
-    use libgit2::libgit2::src::libgit2::oid::{Oid, OidType};
+    use libgit2::libgit2::src::libgit2::oid::Oid;
     use libgit2::libgit2::src::libgit2::repository::{Repository, RepositoryBox, RepositoryRef};
     use libgit2::libgit2::src::libgit2::tree::{FileMode, TreeBuilder, TreeEntryBox};
 
@@ -1892,12 +1858,10 @@ pub(crate) mod object_and_tree_entry {
         repo.repo.as_ref().unwrap().as_ref()
     }
 
-    /// The hex id and C's type of the object an owner holds; the type stands in for
-    /// `git_object_type`'s wrapper (a later run), which replaces it.
+    /// The hex id and C's type of the object an owner holds, through the safe getters.
     pub(crate) fn object_view(object: &ObjectArc<'_>) -> (String, ffi::git_object_t) {
-        let id = object.as_ref().id().to_hex_string().unwrap();
-        // SAFETY: the live object the owner holds, only read.
-        (id, unsafe { ffi::git_object_type(object.as_c_ptr()) })
+        let object = object.as_ref();
+        (object.id().to_hex_string().unwrap(), object.kind().raw())
     }
 
     /// A new blob of `content` in `repo`, looked up as an object; its hex id is read
@@ -1921,18 +1885,7 @@ pub(crate) mod object_and_tree_entry {
     /// Writes a blob holding `data` and a tree naming it once under each of `names`,
     /// through a tree builder; the tree's id.
     pub(crate) fn write_tree(repo: &TempRepo, data: &[u8], names: &[CString]) -> Oid {
-        let mut blob = ffi::git_oid::default();
-        // SAFETY: a writable id, the live repository, and `data`, read for the call.
-        let rc = unsafe {
-            ffi::git_blob_create_from_buffer(
-                &raw mut blob,
-                repo.raw(),
-                data.as_ptr().cast(),
-                data.len(),
-            )
-        };
-        assert_eq!(rc, 0);
-        let blob = Oid::from_raw(&blob.id[..20], OidType::Sha1).unwrap();
+        let blob = create_from_buffer(repository(repo), data).unwrap();
         let mut builder = TreeBuilder::new(repository(repo)).unwrap();
         for name in names {
             let inserted = builder.as_mut().insert(name, blob.as_ref(), FileMode::Blob);
@@ -1941,24 +1894,12 @@ pub(crate) mod object_and_tree_entry {
         builder.as_mut().write().unwrap()
     }
 
-    /// `git_odb_write` of `data` as an object of type `kind`, which the object
+    /// `OdbRef::write` of `data` as an object of type `kind`, which the object
     /// database stores without parsing it; the id.
     pub(crate) fn write_raw(repo: &TempRepo, data: &[u8], kind: ffi::git_object_t) -> Oid {
+        let kind = ObjectType::from_raw(kind).expect("an object type");
         let odb = repository(repo).odb().unwrap();
-        let mut id = ffi::git_oid::default();
-        // SAFETY: the odb is live while `odb` is held; `id` is writable and `data` live
-        // for its length, read for the call only.
-        let rc = unsafe {
-            ffi::git_odb_write(
-                &raw mut id,
-                odb.as_c_ptr(),
-                data.as_ptr().cast(),
-                data.len(),
-                kind,
-            )
-        };
-        assert_eq!(rc, 0);
-        Oid::from_raw(&id.id[..20], OidType::Sha1).unwrap()
+        odb.as_ref().write(data, kind).unwrap()
     }
 
     /// Sets libgit2's object cache limit, in a child process that runs nothing else.
@@ -1977,12 +1918,11 @@ pub(crate) mod object_and_tree_entry {
 
 // --- `git2/filter.h`: `git_filter_list` ---------------------------------------------
 
-use libgit2::libgit2::src::libgit2::filter::FilterListBox;
-
 /// `git_filter_list_apply_to_buffer(out, list, data)`, standing in for the filter
 /// list's apply wrapper (a later run), which replaces it: the filtered bytes, or the
 /// code libgit2 failed with. Filters write the list's state while it applies, hence
-/// the exclusive borrow.
+/// the exclusive borrow. The buffer libgit2 fills is adopted as a [`Buf`], which
+/// releases it.
 pub(crate) fn apply(list: &mut FilterListBox<'_>, data: &[u8]) -> Result<Vec<u8>, c_int> {
     let mut out = ffi::git_buf::default();
     // SAFETY: a zeroed buffer libgit2 fills; the live list, borrowed exclusively for the
@@ -1995,15 +1935,14 @@ pub(crate) fn apply(list: &mut FilterListBox<'_>, data: &[u8]) -> Result<Vec<u8>
             data.len(),
         )
     };
-    let bytes = if rc < 0 || out.ptr.is_null() {
-        Vec::new()
+    // SAFETY: `out` is zeroed, owning nothing, or as libgit2 fills a buffer on success:
+    // owning a NUL-terminated allocation of its allocator, `size` bytes of it initialised.
+    let out = unsafe { Buf::from_raw(out) };
+    if rc < 0 {
+        Err(rc)
     } else {
-        // SAFETY: on success `out` holds `size` initialised bytes at `ptr`.
-        unsafe { std::slice::from_raw_parts(out.ptr.cast::<u8>(), out.size) }.to_vec()
-    };
-    // SAFETY: the buffer libgit2 filled (or left zeroed), released once.
-    unsafe { ffi::git_buf_dispose(&raw mut out) };
-    if rc < 0 { Err(rc) } else { Ok(bytes) }
+        Ok(out.as_ref().as_bytes().to_vec())
+    }
 }
 
 /// The number of filters in `list`: `git_filter_list_length`, standing in for its
@@ -2020,7 +1959,7 @@ pub(crate) fn filter_count(list: &FilterListBox<'_>) -> usize {
 /// filter written through the `git2/sys/filter.h` wrappers (a later run).
 pub(crate) mod filter_probe {
     use std::cell::RefCell;
-    use std::ffi::{CStr, c_char, c_int, c_void};
+    use std::ffi::{c_char, c_int, c_void};
     use std::sync::OnceLock;
 
     use libgit2::ffi;
@@ -2032,15 +1971,9 @@ pub(crate) mod filter_probe {
         static PAYLOADS: RefCell<(usize, usize)> = const { RefCell::new((0, 0)) };
     }
 
-    fn hex(id: *const ffi::git_oid) -> String {
-        let mut out = [0u8; 41];
-        // SAFETY: a live id; `out` holds 41 bytes, NUL included.
-        unsafe { ffi::git_oid_tostr(out.as_mut_ptr().cast(), out.len(), id) };
-        CStr::from_bytes_until_nul(&out)
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_owned()
+    /// The hex form of the source's id, which `id` addresses for the callback.
+    fn hex(id: &ffi::git_oid) -> String {
+        super::oid_of(id).as_ref().to_hex_string().unwrap()
     }
 
     /// `git_filter.check` of the probe: records the source's id and keeps a payload.
@@ -2052,7 +1985,9 @@ pub(crate) mod filter_probe {
     ) -> c_int {
         // SAFETY: libgit2's live source, read for the call.
         let id = unsafe { ffi::git_filter_source_id(src) };
-        SEEN.with_borrow_mut(|seen| seen.push((!id.is_null()).then(|| hex(id))));
+        // SAFETY: NULL, or the source's id, live and unwritten for the call.
+        let id = unsafe { id.as_ref() };
+        SEEN.with_borrow_mut(|seen| seen.push(id.map(hex)));
         PAYLOADS.with_borrow_mut(|p| p.0 += 1);
         // SAFETY: libgit2's live payload slot; the list hands it back to `probe_cleanup`.
         unsafe { payload.write(Box::into_raw(Box::new(0x5EED_u64)).cast()) };
