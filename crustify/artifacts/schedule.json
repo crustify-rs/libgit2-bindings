@@ -21417,7 +21417,7 @@
       "link_unit": "libgit2",
       "module": "src/libgit2/checkout.c",
       "foundational": false,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
           77,
@@ -21438,7 +21438,7 @@
         {
           "index": 0,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_checkout_options",
@@ -21469,7 +21469,9 @@
               "home": "src/libgit2/src/libgit2/checkout.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "50789cf60c87f8610eff8457ea7e16abb0879ca0"
+          ]
         }
       ]
     },

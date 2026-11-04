@@ -1,0 +1,42 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_checkout_options",
+      "defined_in": "include/git2/checkout.h",
+      "kind": "type",
+      "field_anchors": [
+        "target_directory",
+        "version",
+        "paths",
+        "file_mode",
+        "baseline",
+        "our_label",
+        "their_label",
+        "progress_cb",
+        "notify_cb",
+        "perfdata_payload",
+        "perfdata_cb",
+        "ancestor_label",
+        "baseline_index",
+        "progress_payload",
+        "notify_payload",
+        "notify_flags",
+        "file_open_flags",
+        "dir_mode",
+        "disable_filters",
+        "checkout_strategy"
+      ],
+      "home": "src/libgit2/src/libgit2/checkout.rs"
+    }
+  ],
+  "wave": 334,
+  "batch": 0,
+  "link_unit": "libgit2",
+  "module": "src/libgit2/checkout.c",
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-334",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api",
+  "instructions": "instructions.md"
+}
