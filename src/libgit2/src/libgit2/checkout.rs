@@ -570,21 +570,45 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
     /// other is dropped. Callbacks C stored are left alone.
     ///
     /// A panic left behind by an earlier call, which no wrapper resumed (the options were
-    /// handed to C directly), is dropped first: it belonged to that call.
+    /// handed to C directly), is dropped first: it belonged to that call. A walk that a
+    /// stored callback's closure starts, with these same options, while that callback is
+    /// busy, is nested in the walk running the closure, and leaves the panics that walk's
+    /// callbacks already raised in place: the outer walk resumes them, and the nested
+    /// checkout skips their closures, as the rest of the outer one does.
     pub(crate) fn walk_with<R>(
         self,
         walk: impl FnOnce(*const ffi::git_checkout_options) -> R,
     ) -> R {
-        for panic in self.stored_panics().into_iter().flatten() {
-            // SAFETY: `panic` is the panic slot of a live callback the options borrow
-            // exclusively for `'o`, on this thread (neither is `Send`). Only raw pointers
-            // reach the slot, and its trampoline holds none across its closure, which is
-            // the one place this could run during a trampoline: no reference to it is live.
-            unsafe { *panic = None };
+        let slots = self.stored_slots();
+        let nested = slots.iter().flatten().any(|&(_, busy)| {
+            // SAFETY: `busy` is the busy flag of a live callback the options borrow
+            // exclusively for `'o`, on this thread; only raw pointers reach it, and its
+            // trampoline holds no reference to it across its closure.
+            unsafe { busy.read() }
+        });
+        let mut outer = [false; 3];
+        for (held, slot) in outer.iter_mut().zip(slots) {
+            let Some((panic, _)) = slot else { continue };
+            if nested {
+                // SAFETY: `panic` is the panic slot of a live callback the options borrow
+                // exclusively for `'o`, on this thread (neither is `Send`). Only raw
+                // pointers reach the slot, and its trampoline holds none across its
+                // closure, which is the one place this could run during a trampoline: no
+                // reference to it is live. The reference `is_some` makes ends with the
+                // statement.
+                *held = unsafe { (*panic).is_some() };
+            } else {
+                // SAFETY: as above.
+                unsafe { *panic = None };
+            }
         }
         let result = walk(self.as_ptr());
         let mut first = None;
-        for panic in self.stored_panics().into_iter().flatten() {
+        for (held, slot) in outer.into_iter().zip(self.stored_slots()) {
+            let Some((panic, _)) = slot else { continue };
+            if held {
+                continue;
+            }
             // SAFETY: as above; the reference `take` makes ends with the statement.
             let taken = unsafe { (*panic).take() };
             first = first.or(taken);
@@ -595,26 +619,35 @@ impl<'a, 'o> CheckoutOptionsRef<'a, 'o> {
         result
     }
 
-    /// The panic slots of the Rust callbacks stored in the options, in the order their
-    /// panics resume.
-    fn stored_panics(self) -> [Option<*mut Option<Panic>>; 3] {
+    /// The panic slots and busy flags of the Rust callbacks stored in the options, in the
+    /// order their panics resume.
+    fn stored_slots(self) -> [Option<(*mut Option<Panic>, *mut bool)>; 3] {
         let (notify, notify_payload) = self.notify_fields();
         let (progress, progress_payload) = self.progress_fields();
         let (perfdata, perfdata_payload) = self.perfdata_fields();
+        // Each callback is the live one its setter stored and the options borrow for `'o`,
+        // which outlives this handle.
         [
             stored_notify(notify, notify_payload).map(|callback| {
-                // SAFETY: `callback` is the live callback the setter stored and the options
-                // borrow for `'o`, which outlives this handle; the projection forms no
-                // reference to it.
-                unsafe { &raw mut (*callback).panic }
+                // SAFETY: `callback` is live, as above; the projection forms no reference.
+                let panic = unsafe { &raw mut (*callback).panic };
+                // SAFETY: as above.
+                let busy = unsafe { &raw mut (*callback).busy };
+                (panic, busy)
             }),
             stored_progress(progress, progress_payload).map(|callback| {
                 // SAFETY: as above.
-                unsafe { &raw mut (*callback).panic }
+                let panic = unsafe { &raw mut (*callback).panic };
+                // SAFETY: as above.
+                let busy = unsafe { &raw mut (*callback).busy };
+                (panic, busy)
             }),
             stored_perfdata(perfdata, perfdata_payload).map(|callback| {
                 // SAFETY: as above.
-                unsafe { &raw mut (*callback).panic }
+                let panic = unsafe { &raw mut (*callback).panic };
+                // SAFETY: as above.
+                let busy = unsafe { &raw mut (*callback).busy };
+                (panic, busy)
             }),
         ]
     }
@@ -2494,6 +2527,62 @@ mod unit_tests {
         ];
         assert_eq!(events, expected);
         assert_eq!(nested.borrow().clone(), [ErrorCode::User.raw(), 0, 0]);
+    }
+
+    #[test]
+    fn a_nested_walk_leaves_the_outer_walks_panics_to_it() {
+        let options = Cell::new(ptr::null::<ffi::git_checkout_options>());
+        let data = CheckoutPerfdata::default();
+        let events = RefCell::new(Vec::new());
+        let nested = Cell::new(None);
+        // The progress closure panics at the outer level; the performance-data closure then
+        // checks out again with the same options, through their walk, as a closure calling
+        // `Worktree::add` with its own options does.
+        let mut on_progress = |path: Option<&CStr>, _, _| {
+            events.borrow_mut().push(('p', path.map(CStr::to_owned)));
+            assert!(path != Some(c"outer"), "progress");
+        };
+        let mut on_perfdata = |_: CheckoutPerfdataRef<'_>| {
+            events.borrow_mut().push(('f', None));
+            if nested.get().is_none() {
+                // SAFETY: the options are live for the outer walk, which this closure runs
+                // in, and only read through the shared handle.
+                let o = unsafe { CheckoutOptionsRef::from_ptr(options.get().cast_mut()) };
+                let walk = || {
+                    // SAFETY: the options are live, and their trampolines sound for these
+                    // arguments.
+                    o.unwrap()
+                        .walk_with(|o| unsafe { run_callbacks(o, 1, c"inner", &data) })
+                };
+                nested.set(Some(panic::catch_unwind(AssertUnwindSafe(walk)).is_ok()));
+            }
+        };
+        let mut progress = ProgressCallback::new(&mut on_progress);
+        let mut perfdata = PerfdataCallback::new(&mut on_perfdata);
+        let mut o = template();
+        let mut m = o.as_mut();
+        m.set_progress_callback(Some(&mut progress));
+        m.set_perfdata_callback(Some(&mut perfdata));
+        options.set(o.as_ref().as_ptr());
+        let walk = || {
+            // SAFETY: as above.
+            o.as_ref()
+                .walk_with(|o| unsafe { run_callbacks(o, 1, c"outer", &data) })
+        };
+        let panic = panic::catch_unwind(AssertUnwindSafe(walk)).unwrap_err();
+        // The outer walk resumes its own panic; the nested walk resumed nothing, and skipped
+        // the panicked progress closure, as the rest of the outer walk does.
+        assert_eq!(panic.downcast_ref::<&str>(), Some(&"progress"));
+        assert_eq!(nested.get(), Some(true));
+        let seen = events.borrow().clone();
+        assert_eq!(seen, [('p', Some(c"outer".to_owned())), ('f', None)]);
+        // The slot was emptied: the next walk runs the closure again.
+        // SAFETY: as above.
+        let rc = o
+            .as_ref()
+            .walk_with(|o| unsafe { run_callbacks(o, 1, c"again", &data) });
+        assert_eq!(rc, 0);
+        assert_eq!(events.borrow().len(), 4);
     }
 
     #[test]
