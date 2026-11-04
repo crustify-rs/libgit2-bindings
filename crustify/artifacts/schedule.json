@@ -21292,7 +21292,7 @@
       "module": "src/libgit2/checkout.c",
       "foundational": false,
       "reviews": 330,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
           330
@@ -21309,20 +21309,26 @@
         {
           "index": 0,
           "kind": "review",
-          "status": "todo",
+          "status": "done",
           "reviews": [
             0
           ],
-          "commits": []
+          "commits": [
+            "57a1f7e92cc79735224b668638742cb5fb0f253d",
+            "24e53104be4d887d5fa9ac013d680073b362b467"
+          ]
         },
         {
           "index": 1,
           "kind": "review",
-          "status": "todo",
+          "status": "done",
           "reviews": [
             1
           ],
-          "commits": []
+          "commits": [
+            "bda1091c48e8aa11c5c9e37013746167f2df258f",
+            "d51d16891838254dea2337a6e7c2ab1a5af8f7d8"
+          ]
         }
       ]
     },
@@ -21378,7 +21384,7 @@
       "module": "src/libgit2/checkout.c",
       "foundational": false,
       "reviews": 332,
-      "status": "todo",
+      "status": "wip",
       "depends_on": {
         "scheduled": [
           332
@@ -21395,7 +21401,7 @@
         {
           "index": 0,
           "kind": "review",
-          "status": "todo",
+          "status": "wip",
           "reviews": [
             0
           ],
