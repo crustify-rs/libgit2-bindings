@@ -7,6 +7,7 @@ mod checkout;
 mod commit;
 mod config;
 mod diff;
+mod diff_parse;
 mod filter;
 mod index;
 mod indexer;

@@ -1453,6 +1453,23 @@
    ]
   },
   {
+   "name": "git_diff_parse_options",
+   "defined_in": "include/git2/diff.h",
+   "_comment_user": "Plain 8-byte value, no pointers and no lifecycle routines: libgit2 has no git_diff_parse_options_init, GIT_DIFF_PARSE_OPTIONS_INIT is the only constructor. Its only reader, git_diff_from_buffer_ext, reads oid_type during the call (0 selects GIT_OID_DEFAULT) and never reads version, and retains nothing. An oid_type that names no type is unchecked and sizes ids as none, so the binding stores only 0 or a named git_oid_t.",
+   "fields": [
+    {
+     "name": "oid_type",
+     "refcount": false,
+     "locked_by": null
+    },
+    {
+     "name": "version",
+     "refcount": false,
+     "locked_by": null
+    }
+   ]
+  },
+  {
    "name": "git_error",
    "defined_in": "include/git2/errors.h",
    "fields": [
