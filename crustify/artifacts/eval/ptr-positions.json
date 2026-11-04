@@ -1,0 +1,234 @@
+{
+ "wrapped_types": 121,
+ "unwrapped_api_fns": 487,
+ "positions": {
+  "ptr_arg": 403,
+  "ptr_ret": 30,
+  "val_arg": 11,
+  "val_ret": 4
+ },
+ "fields": {
+  "ptr_fld": 46,
+  "val_fld": 32
+ },
+ "distinct_fns": {
+  "ptr_arg": 248,
+  "ptr_ret": 30,
+  "val_arg": 11,
+  "val_ret": 4
+ },
+ "distinct_structs": {
+  "ptr_fld": 20,
+  "val_fld": 25
+ },
+ "per_type": {
+  "git_repository": {
+   "ptr_arg": 126,
+   "ptr_ret": 7,
+   "ptr_fld": 5
+  },
+  "git_oid": {
+   "ptr_ret": 15,
+   "ptr_arg": 48,
+   "val_arg": 4,
+   "ptr_fld": 7,
+   "val_fld": 11
+  },
+  "git_reference": {
+   "ptr_arg": 45,
+   "ptr_fld": 5
+  },
+  "git_signature": {
+   "ptr_arg": 16,
+   "ptr_ret": 3,
+   "ptr_fld": 8
+  },
+  "git_buf": {
+   "ptr_arg": 22,
+   "ptr_fld": 2
+  },
+  "git_strarray": {
+   "ptr_arg": 11,
+   "val_fld": 7
+  },
+  "git_diff": {
+   "ptr_arg": 15,
+   "ptr_fld": 2
+  },
+  "git_commit": {
+   "ptr_arg": 13
+  },
+  "git_checkout_options": {
+   "ptr_arg": 6,
+   "val_fld": 6
+  },
+  "git_odb_backend": {
+   "ptr_arg": 11
+  },
+  "git_annotated_commit": {
+   "ptr_arg": 10
+  },
+  "git_object": {
+   "ptr_arg": 7,
+   "ptr_fld": 2
+  },
+  "git_oid_t": {
+   "ptr_arg": 1,
+   "ptr_fld": 1,
+   "val_fld": 7
+  },
+  "git_filter_list": {
+   "ptr_arg": 9
+  },
+  "git_index": {
+   "ptr_arg": 8
+  },
+  "git_blob": {
+   "ptr_arg": 8
+  },
+  "git_odb": {
+   "ptr_arg": 6,
+   "ptr_fld": 1
+  },
+  "git_index_entry": {
+   "ptr_ret": 3,
+   "ptr_arg": 3
+  },
+  "git_diff_delta": {
+   "ptr_ret": 1,
+   "ptr_arg": 2,
+   "ptr_fld": 3
+  },
+  "git_transaction": {
+   "ptr_arg": 6
+  },
+  "git_tree": {
+   "ptr_arg": 4,
+   "ptr_fld": 1
+  },
+  "git_indexer_progress": {
+   "ptr_ret": 1,
+   "ptr_arg": 2,
+   "ptr_fld": 1
+  },
+  "git_writestream": {
+   "ptr_arg": 3,
+   "ptr_fld": 1
+  },
+  "git_indexer_progress_cb": {
+   "ptr_arg": 2,
+   "ptr_fld": 2
+  },
+  "git_submodule_ignore_t": {
+   "val_arg": 2,
+   "val_ret": 1,
+   "val_fld": 1
+  },
+  "git_branch_t": {
+   "val_arg": 2,
+   "ptr_arg": 1
+  },
+  "git_odb_stream": {
+   "ptr_arg": 3
+  },
+  "git_refdb": {
+   "ptr_arg": 2,
+   "ptr_fld": 1
+  },
+  "git_oidarray": {
+   "ptr_arg": 2,
+   "ptr_fld": 1
+  },
+  "git_allocator": {
+   "ptr_arg": 2
+  },
+  "git_submodule_recurse_t": {
+   "val_arg": 1,
+   "val_ret": 1
+  },
+  "git_submodule_update_t": {
+   "val_arg": 1,
+   "val_ret": 1
+  },
+  "git_config_backend": {
+   "ptr_arg": 2
+  },
+  "git_config_backend_memory_options": {
+   "ptr_arg": 2
+  },
+  "git_diff_file": {
+   "ptr_fld": 2
+  },
+  "git_object_t": {
+   "val_arg": 1
+  },
+  "git_reference_t": {
+   "val_ret": 1
+  },
+  "git_odb_writepack": {
+   "ptr_arg": 1
+  },
+  "git_odb_foreach_cb": {
+   "ptr_arg": 1
+  },
+  "git_odb_expand_id": {
+   "ptr_arg": 1
+  },
+  "git_repository_mergehead_foreach_cb": {
+   "ptr_arg": 1
+  },
+  "git_pathspec": {
+   "ptr_arg": 1
+  },
+  "git_commit_create_cb": {
+   "ptr_fld": 1
+  }
+ },
+ "signature_positions": {
+  "enum_ptr_arg": 2,
+  "enum_val_arg": 7,
+  "enum_val_ret": 4,
+  "struct_ptr_arg": 401,
+  "struct_ptr_ret": 30,
+  "struct_val_arg": 4
+ },
+ "field_positions_direct": {
+  "enum_cb": 1,
+  "enum_val": 8,
+  "struct_cb": 26,
+  "struct_ptr": 19,
+  "struct_val": 24
+ },
+ "field_positions_nested": {
+  "enum_val_nested": 2,
+  "struct_cb_nested": 13,
+  "struct_ptr_nested": 5,
+  "struct_val_nested": 3
+ },
+ "nested_examples": {
+  "struct_ptr_nested": [
+   "git_clone_options.fetch_opts.callbacks.transfer_progress: git_indexer_progress_cb",
+   "git_push_options.callbacks.transfer_progress: git_indexer_progress_cb",
+   "git_submodule_update_options.fetch_opts.callbacks.transfer_progress: git_indexer_progress_cb",
+   "git_remote_connect_options.callbacks.transfer_progress: git_indexer_progress_cb",
+   "git_fetch_options.callbacks.transfer_progress: git_indexer_progress_cb"
+  ],
+  "struct_cb_nested": [
+   "git_clone_options.fetch_opts.callbacks.update_refs: git_oid",
+   "git_clone_options.fetch_opts.callbacks.update_tips: git_oid",
+   "git_push_options.callbacks.update_refs: git_oid",
+   "git_push_options.callbacks.update_tips: git_oid",
+   "git_submodule_update_options.fetch_opts.callbacks.update_refs: git_oid",
+   "git_submodule_update_options.fetch_opts.callbacks.update_tips: git_oid"
+  ],
+  "struct_val_nested": [
+   "git_clone_options.fetch_opts.custom_headers: git_strarray",
+   "git_submodule_update_options.fetch_opts.custom_headers: git_strarray",
+   "git_email_create_options.diff_opts.pathspec: git_strarray"
+  ],
+  "enum_val_nested": [
+   "git_email_create_options.diff_opts.ignore_submodules: git_submodule_ignore_t",
+   "git_email_create_options.diff_opts.oid_type: git_oid_t"
+  ]
+ }
+}
