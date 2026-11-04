@@ -6,7 +6,7 @@ objects and every test and doctest binary as objects for every suite. A scope's 
 resolves the relative paths a C build recorded. MERGED=1 reuses the merged profiles."""
 import subprocess,sys,pathlib,json,glob,os
 out0=pathlib.Path(sys.argv[1])
-nightly=next(l.split('"')[1] for l in open(out0/'tree'/'Cargo.toml') if l.startswith('nightly = '))
+nightly=os.environ.get("NIGHTLY") or next(l.split('"')[1] for l in open(out0/"tree"/"Cargo.toml") if l.startswith("nightly = "))
 sysroot=subprocess.run(['rustc','+'+nightly,'--print','sysroot'],capture_output=True,text=True,check=True).stdout.strip()
 B=sysroot+'/lib/rustlib/x86_64-unknown-linux-gnu/bin/'
 out=pathlib.Path(sys.argv[1]); scopes=dict(s.split('=',1) for s in sys.argv[2].split(','))

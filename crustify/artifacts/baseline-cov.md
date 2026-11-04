@@ -5,7 +5,7 @@ safe wrapper over `libgit2-sys`. This file records its tests, their Rust and C
 line coverage, its API coverage of libgit2, and the unsafe surface its public
 interface exports.
 
-Measured `2026-10-12`.
+Measured `2026-10-12`; test coverage re-measured `2026-11-04`.
 
 ## 0. Subject
 
@@ -26,11 +26,10 @@ The clone was not modified; every build used a separate target directory.
 bindings plus `build.rs`), `git2-curl` and `systest` are not, and none of their
 tests are counted.
 
-Toolchain: `rustc 1.99.0` stable (LLVM `23.1.1`), `cargo-llvm-cov 0.6.21` for
-the Rust coverage; `Ubuntu clang 18.1.3` with `--coverage`, `llvm-cov-18 gcov`
-and `lcov 2.0` for the C coverage, the libgit2 campaign's own coverage
-toolchain; CodeQL `2.26.3`; in a container derived from `crustify:latest`
-(Ubuntu noble).
+Toolchain: `rustc 1.99.0` stable (LLVM `23.1.1`) and CodeQL `2.26.3`, in a container
+derived from `crustify:latest` (Ubuntu noble). The test coverage of section 2 was measured
+on `nightly-2026-10-08` (LLVM `23.1.3`) with its `llvm-profdata` and `llvm-cov`, and
+`Ubuntu clang 23.1.2` for the C.
 
 ## 1. Tests
 
@@ -73,126 +72,72 @@ modules under `src/`, `476` under `tests/`. Non-test `src/` is `15,649` LoC over
 
 ## 2. Test coverage
 
-Rust and C are measured the way the libgit2 campaign measures its own crate,
-in two runs of the whole suite per configuration. **Rust** is LLVM source-based
-line coverage from `cargo llvm-cov` over the authored non-test source. **C** is
-gcov line coverage of a `--coverage` build of the bundled libgit2, read by
-lcov with a zero baseline from the `.gcno` files, which is the campaign's
-`coverage.py` method (see C below). The Rust run below also instrumented the C
-with LLVM coverage; that view is kept only as a note under C, since it is not
-comparable with the campaign's.
+Re-measured `2026-11-04` with the testing spec's Coverage method, the one the campaign's
+`dashboard.md` Coverage stats now use, which replaces the gcov and `cargo llvm-cov`
+measurement of `2026-10-12`. Those figures are not comparable with these. C and Rust are
+counted by one instrument: `libgit2-sys`'s `cc` build compiles the bundled libgit2 with
+clang 23 (`CC=/usr/lib/llvm-23/bin/clang`,
+`CFLAGS="-fprofile-instr-generate -fcoverage-mapping"`) and links it statically into every
+test binary, and `git2` is compiled on `nightly-2026-10-08` (LLVM 23) with
+`-C instrument-coverage`, in a scratch copy whose test items carry `#[coverage(off)]`. The
+clone itself was not modified. Each suite runs alone into its own profile: the `--lib`
+unit tests, each of the six `tests/` binaries and the doctests. The union merges all of
+them. Every figure is the `TOTAL` line of the nightly's `llvm-cov report`, with every test
+and doctest binary as objects for every suite, so that every suite has the same
+denominator. Only `https,ssh` was measured; the `unstable-sha256` configuration was not
+re-measured.
 
 ```sh
-CC=/usr/lib/llvm-23/bin/clang \
-CFLAGS="-fprofile-instr-generate -fcoverage-mapping" \
-cargo llvm-cov --no-report --locked -p git2 --features https,ssh --include-ffi
-# and again, into its own target dir, with --features https,ssh,unstable-sha256
-cargo llvm-cov report --include-ffi --json --summary-only   # per-file totals
-cargo llvm-cov report --include-ffi --lcov                  # per-line, for the non-test cut
+# from the libgit2-bindings checkout, scripts under crustify/scripts/coverage/
+baseline.sh /crustify-rs/git2-rs git2 "$PWD/crustify/tmp/baseline-git2" nightly-2026-10-08 \
+    --locked --features https,ssh
+L=$PWD/crustify/tmp/baseline-git2/tree/libgit2-sys/libgit2
+NIGHTLY=nightly-2026-10-08 report.py crustify/tmp/baseline-git2 \
+    "C=$L/src/libgit2:$L/src/util:$L/include:$L/deps/xdiff:$L/deps/llhttp,Rust=$PWD/crustify/tmp/baseline-git2/tree/src" --c
 ```
 
-Doctests are not in the Rust figures: `cargo llvm-cov` instruments rustdoc's
-binaries only on nightly.
+Every test passed but the one trybuild case, `tests/compile_fail.rs`, whose expected
+stderr is stable's and differs under the nightly. It passes on stable and runs no code, so
+it adds nothing to either figure. llvm-cov reports `7` functions with mismatched data
+between binaries, whose counts it drops.
 
-That the C really was the instrumented bundled copy was checked on the build
-output: `libgit2-sys` linked `static=git2` from its own `OUT_DIR` (no system
-libgit2 is installed), and the archive's `repository.o` carries
-`__llvm_covmap` / `__llvm_covfun` / `__llvm_prf_cnts` and a
-`clang version 23.1.2` `.comment`. Counters from both compilers read back
-non-zero through the one merged profile, so the raw formats agree.
+### Rust: `git2`'s own `src/`
 
-### Rust — `git2`'s own `src/`
-
-| scope | files | LoC | regions | functions |
+| suite | tests | lines | functions | regions |
 |---|---:|---:|---:|---:|
-| `src/`, non-test (inline `#[cfg(test)]` excluded) | `64` | **`61.24%`** (`6303`/`10293`) | — | **`57.21%`** (`1083`/`1893`) |
-| `src/`, whole files (llvm-cov summary) | `64` | `71.11%` (`10278`/`14454`) | `74.97%` (`17731`/`23651`) | `62.60%` (`1366`/`2182`) |
-| `src/`, non-test, `+unstable-sha256` | `64` | `61.34%` (`6332`/`10322`) | — | `57.29%` (`1085`/`1894`) |
-| `src/`, whole files, `+unstable-sha256` | `64` | `71.84%` (`10661`/`14839`) | `75.71%` (`18611`/`24581`) | `63.19%` (`1399`/`2214`) |
+| `--lib` unit tests | `215` | `59.25%` (`6331`/`10685`) | — | — |
+| `tests/end_to_end.rs` | `5` | `4.67%` (`499`/`10685`) | — | — |
+| the other four `tests/` binaries | `4` | `0.70`–`0.90%` | — | — |
+| doctests | `12` passed, `1` ignored | `1.37%` (`146`/`10675`) | — | — |
+| **union** | **`238`** | **`60.59%`** (`6468`/`10675`) | **`56.87%`** (`1084`/`1906`) | **`58.55%`** (`6400`/`10930`) |
 
-The first row is the one to read: it is the authored non-test source, the basis
-`dashboard.md` uses. It is cut from the LCOV export by brace-matching every
-`#[cfg(test)]` item, which removes `3,906` instrumented lines; functions are
-counted once per definition site, not per monomorphisation. Regions have no
-per-line form in LCOV, so they are given for whole files only.
+The denominator is the `64` files under `src/`, test items excluded by the attribute
+rather than cut from the report: `10,685` lines, `10,675` once the doctest profiles are
+merged. `5` files have `0%` line coverage: `src/cert.rs`, `src/email.rs`, `src/patch.rs`,
+`src/revert.rs`, `src/version.rs`.
 
-`5` files have `0%` line coverage: `src/cert.rs`, `src/email.rs`,
-`src/patch.rs`, `src/revert.rs`, `src/version.rs`.
+### C: the bundled libgit2 `v1.9.6`
 
-The SHA-256 rows are `https,ssh` plus the feature: the feature compiles in
-`29` more non-test lines (the `ObjectFormat` paths) and the `28` tests lift the
-non-test line figure by `+0.10`pp; the cut removes `4,260` instrumented test
-lines instead of `3,906`.
+| scope | lines | functions |
+|---|---:|---:|
+| `src/libgit2/` | `52.17%` (`29943`/`57398`) | `66.77%` (`2200`/`3295`) |
+| `src/util/` | `52.25%` (`4468`/`8552`) | `69.20%` (`391`/`565`) |
+| **libgit2 proper** | **`52.18%`** (`34411`/`65950`) | **`67.12%`** (`2591`/`3860`) |
+| `deps/xdiff/` | `42.21%` (`957`/`2267`) | `57.58%` (`57`/`99`) |
+| `deps/llhttp/` | `0.00%` (`0`/`9513`) | `0.00%` (`0`/`123`) |
+| `deps/pcre2/` | `12.11%` (`2025`/`16728`) | `19.57%` (`27`/`138`) |
+| **campaign-equivalent** (proper + `xdiff` + `llhttp`) | **`45.50%`** (`35368`/`77730`) | `64.87%` (`2648`/`4082`) |
+| all compiled | `39.59%` (`37393`/`94458`) | `63.39%` (`2675`/`4220`) |
 
-### C — the bundled libgit2 `v1.9.6`
-
-gcov line coverage, as the libgit2 campaign takes it (`coverage.py` in its
-orchestrator; `dashboard.md`, "Reading the batch tables"): a clang `--coverage
--O0` build, lcov `2.0` with `llvm-cov-18 gcov` as its gcov tool and the same
-`--ignore-errors` set, a zero baseline captured from the `.gcno` files before
-any test runs so that files no test reaches count at `0%`, and lines counted
-over `.c` translation units only. The difference is the build: the campaign
-instruments its `coverage` prebuild of `libgit2.so` through CMake, while here
-`libgit2-sys`'s own `cc` build of the bundled copy is instrumented, linked
-statically into every test binary.
-
-```sh
-# gcov_run.sh <tag> <features>, once for https,ssh and once with +unstable-sha256
-export CC=clang CFLAGS="--coverage -O0" CARGO_TARGET_DIR=<own dir>
-export RUSTFLAGS="-C linker=clang -C link-arg=--coverage" RUSTDOCFLAGS="$RUSTFLAGS"
-cargo test --locked -p git2 --features "$feats" --no-run
-lcov -c -i -d <libgit2-sys OUT_DIR> --gcov-tool gcov-llvm -o base.info   # zero baseline
-cargo test --locked -p git2 --features "$feats" --no-fail-fast          # lib, tests/, doctests
-lcov -c -d <libgit2-sys OUT_DIR> --gcov-tool gcov-llvm -o run.info
-lcov -a base.info -a run.info -o merged.info                             # gcov_sum.py totals it
-```
-
-`gcov-llvm` is `exec llvm-cov-18 gcov "$@"`, as in the campaign. Linking
-through clang brings in its gcov runtime (`libclang_rt.profile`), which the
-instrumented objects call; rustdoc gets the same flags, so **doctests run
-and count here** (`12` passed, `1` ignored, in both configurations), unlike in
-the Rust figures. Every test passed in both runs. `libgit2-sys` compiled `205`
-C files and left `205` `.gcno` files; `193` of them carry lines, and the other
-`12` compile to nothing on Linux.
-
-| scope | `.c` files | zero-cov files | lines, `https,ssh` | functions, `https,ssh` | lines, `+unstable-sha256` | functions, `+unstable-sha256` |
-|---|---:|---:|---:|---:|---:|---:|
-| `src/libgit2/` | `122` | `11` | **`52.40%`** (`25649`/`48951`) | `66.78%` (`2294`/`3435`) | `52.64%` (`25807`/`49022`) | `67.01%` (`2303`/`3437`) |
-| `src/util/` | `34` | `4` | **`49.52%`** (`3453`/`6973`) | `64.82%` (`328`/`506`) | `49.52%` (`3453`/`6973`) | `64.82%` (`328`/`506`) |
-| **libgit2 proper** | **`156`** | **`15`** | **`52.04%`** (`29102`/`55924`) | **`66.53%`** (`2622`/`3941`) | **`52.25%`** (`29260`/`55995`) | **`66.73%`** (`2631`/`3943`) |
-| `deps/xdiff/` | `7` | `2` | `42.70%` (`840`/`1967`) | `58.16%` (`57`/`98`) | same | same |
-| `deps/llhttp/` | `3` | `3` | `0.00%` (`0`/`4538`) | `0.00%` (`0`/`123`) | same | same |
-| `deps/pcre2/` | `27` | `20` | `9.38%` (`1328`/`14152`) | `14.84%` (`27`/`182`) | `9.36%` (`1325`/`14152`) | `14.84%` (`27`/`182`) |
-| **campaign-equivalent** (proper + `xdiff` + `llhttp`) | **`166`** | **`20`** | **`47.96%`** (`29942`/`62429`) | `64.37%` (`2679`/`4162`) | **`48.16%`** (`30100`/`62500`) | `64.55%` (`2688`/`4164`) |
-| all compiled | `193` | `40` | `40.83%` (`31270`/`76581`) | `62.29%` (`2706`/`4344`) | `41.00%` (`31425`/`76652`) | `62.47%` (`2715`/`4346`) |
-
-The **campaign-equivalent** row is the scope to set against the campaign's C
-figure: its `196` `libgit2.so` TUs are `src/libgit2/`, `src/util/` and the
-bundled `xdiff`, `llhttp`, `ntlmclient` and `reftable`, with PCRE2 taken from
-the system. `libgit2-sys` compiles neither `ntlmclient` nor (`v1.9.6` has
-none) `reftable`, and builds its own PCRE2, which is therefore kept out of that
-row. The denominator is what `libgit2-sys` compiles for Linux, not the whole
-tree: no `src/cli/`, no other platforms' or backends' variants. libssh2, zlib
-and OpenSSL are outside the subject and not reported. `llhttp` is the HTTP
-parser behind the `https` transport, which no test drives against a server.
-
-Under `unstable-sha256` `libgit2-sys` compiles the bundled libgit2 with
-`GIT_EXPERIMENTAL_SHA256=1` (confirmed in its build output:
-`rustc-cfg=libgit2_experimental_sha256`, `libgit2_vendored`), which adds the
-SHA-256 object-format paths: `+71` lines and `+2` functions in `src/libgit2/`,
-none elsewhere. The `28` SHA-256 tests reach `+158` C lines, `+0.21`pp on
-libgit2 proper.
-
-**LLVM source-based view, not comparable with the campaign.** The Rust
-coverage run above also compiled the C with clang 23
-`-fprofile-instr-generate -fcoverage-mapping`. llvm-cov counts a line wherever
-a coverage region maps code to it, headers included, so its denominator is
-larger (`65,953` lines over `234` `.c` and header files for libgit2 proper,
-against gcov's `55,924` over `156` `.c` files) while the percentage lands in
-the same place: libgit2 proper `52.04%` lines and `67.12%` functions under
-`https,ssh` (`52.33%` / `67.40%` with `unstable-sha256`), `src/libgit2/`
-`52.04%`, `src/util/` `52.09%`, `deps/xdiff/` `42.21%`, `deps/pcre2/`
-`12.11%`, `deps/llhttp/` `0%`. Doctests are not in that view.
+Lines are counted over every `.c` and header file a coverage region maps code to, so the
+denominators are larger than gcov's. `include/` maps no code. The campaign-equivalent row
+is the scope to set against the campaign's C: its `libgit2.so` also compiles `ntlmclient`
+and `reftable`, which `libgit2-sys` does not, and it takes PCRE2 from its side library, so
+`deps/pcre2/` is kept out. The denominator is what `libgit2-sys` compiles for Linux, not
+the whole tree. libssh2, zlib and OpenSSL are outside the subject and not reported.
+`llhttp` is the HTTP parser behind the `https` transport, which no test drives against a
+server. The doctests reach `1.23%` of the campaign-equivalent lines, and the unit tests
+`45.04%`.
 
 ## 3. API coverage
 
@@ -439,7 +384,7 @@ their own revision's API.
 | all raw-pointer positions (sum of the six `raw_ptr_*` partitions)¹ | `442` | `338` |
 | `ffi_calls` | `919` | `672` |
 | tests targeting a sanitizer | see `dashboard.md` | `0` |
-| C line coverage, gcov | not recorded | `47.96%` (campaign-equivalent scope, `https,ssh`) |
+| C line coverage, source-based, campaign-equivalent scope | see below | `45.50%` (`https,ssh`) |
 
 The campaign's figure is anchor-based (a filled `Wraps:` / `Replaces:` on an
 item), not a mention scan, so it is the stricter measure of the two. ¹ The unsafe-surface rows are not restated: both are fresh scans with the
@@ -451,34 +396,31 @@ count only what each crate defines, so ffibox's own conversions and the
 public figures by construction, while `git2`'s own `Binding::from_raw` /
 `raw` are inside its.
 
-The earlier campaign recorded no test coverage. The active one does, by the
-method section 2's C figures copy: at `122b78d05` its `Total tests` reach
-`46.65`% C line coverage over its `196` `libgit2.so` TUs, against `git2`'s
-`47.96`% over the campaign-equivalent `166` files of `v1.9.6`. The two C trees
-differ (a `main` revision with `ntlmclient` and `reftable`, against `v1.9.6`
-with neither), so the figures are close in method, not in denominator. Its
-Rust figure (`99.55`%) is non-test line coverage like `git2`'s `61.24`%.
+The earlier campaign recorded no test coverage. The active one does, measured by section 2's
+method on `2026-11-04` at `1e732ebff`: its four suites' union reaches `46.78`% of C lines
+over the same campaign-equivalent scope of its own revision (`37333`/`79803`), against
+`git2`'s `45.50`% of `v1.9.6`'s, and `52.42`% of libgit2 proper (`35658`/`68023`)
+against `52.18`%. The two C trees differ (a `main` revision with `ntlmclient` and
+`reftable`, against `v1.9.6` with neither), so the figures are counted alike, not over one
+denominator. Its Rust union (`98.92`%) is over its own non-test source, like `git2`'s
+`60.59`%.
 
 ## 7. Notes and limitations
 
-- **Doctests are in the C coverage, not the Rust.** gcov needs no rustdoc
-  support, so the C runs include their `13`; `cargo llvm-cov` on stable
-  instruments only the test targets, so the Rust figures leave them out.
-- **C build differs from the campaign's.** The method (clang `--coverage
-  -O0`, `llvm-cov-18 gcov`, lcov with a `.gcno` zero baseline, `.c` TUs only)
-  is the campaign's; the build is `libgit2-sys`'s `cc` build linked
-  statically, not a CMake `libgit2.so`, so defines and compiled files follow
-  `libgit2-sys`'s choices.
+- **Doctests are a suite of their own.** They run on the nightly, instrumented like the
+  test binaries, and count in both the C and the Rust union.
+- **C build differs from the campaign's.** The instrument is the campaign's; the build is
+  `libgit2-sys`'s `cc` build linked statically, not a CMake `libgit2.so`, so defines and
+  compiled files follow `libgit2-sys`'s choices.
 - **The C denominator is the compiled subset.** Files `libgit2-sys` never
   compiles (`src/cli/`, other platforms, other hash and HTTPS backends) are
   absent from the report, not counted as uncovered.
 - **Feature- and platform-gated tests.** The headline `https,ssh` figures leave
   out the `28` `unstable-sha256` tests, reported in their own column and rows;
   the `2` `cfg(windows)` tests run in no configuration here.
-- **Inline-test exclusion is textual.** `#[cfg(test)]` items are found by
-  brace matching on source. A brace inside a string or char literal in a test
-  module would mis-end it. The `3,906` instrumented lines removed and the
-  `5,341` test LoC are consistent with the module sizes.
+- **Test items are excluded by `#[coverage(off)]`**, which the scratch copy adds to every
+  `#[test]`, `#[cfg(test)]` or `cfg`-on-`test` function, impl and module. Test code that is
+  not an item stays instrumented.
 - **API coverage is an upper bound**, per the method. It is version-blind
   within `src/` (feature-gated code counts) and is scored against `v1.9.6`, not
   the campaign's revision.
@@ -487,3 +429,5 @@ Rust figure (`99.55`%) is non-test line coverage like `git2`'s `61.24`%.
   `lcov_nontest.py` (non-test coverage cut), `bucket.py` (per-directory LLVM
   coverage), `gcov_run.sh` / `gcov_sum.py` (gcov C coverage, under
   `gcov-https/` and `gcov-sha/`), `scan_features.py` (feature-aware scan).
+  The `2026-11-04` coverage was measured under `crustify/tmp/baseline-git2/` by
+  `crustify/scripts/coverage/baseline.sh` and `report.py`.
