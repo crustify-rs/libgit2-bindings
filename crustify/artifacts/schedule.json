@@ -15637,7 +15637,7 @@
       "module": "src/libgit2/diff_parse.c",
       "foundational": false,
       "reviews": 228,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
           228
@@ -15654,12 +15654,15 @@
         {
           "index": 0,
           "kind": "review",
-          "status": "todo",
+          "status": "done",
           "reviews": [
             0,
             1
           ],
-          "commits": []
+          "commits": [
+            "6cef29a52b825e43e82b650dc64311adf2b663f3",
+            "76a82befc3f255381baa831d779e34239f5d6e26"
+          ]
         }
       ]
     },
