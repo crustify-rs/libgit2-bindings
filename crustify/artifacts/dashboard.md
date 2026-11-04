@@ -883,7 +883,7 @@ with `unsafe`, for safe constructors the crate does not have yet; the review did
 It is an open departure from the `ub_safe` contract, left in place until the constructors
 it stands in for are wrapped.
 
-Review wave `526` (`reviewer/run-132`, outside `schedule.json`, at the user's request) moved the
+Review wave `526` (`reviewer/run-132`, $3.48, 8.54M tokens, 16m41s; outside `schedule.json`, at the user's request) moved the
 fixture onto the wrappers that had landed since: of the 51 FFI functions it called, 17 are
 gone, and its `unsafe` blocks went from 117 to 92. Six of the 23 functions with wrappers stay
 raw, each for a form the wrappers do not offer, as its docs say: a C blob stream lent as a

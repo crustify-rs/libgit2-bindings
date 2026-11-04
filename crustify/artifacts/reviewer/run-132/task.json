@@ -1,0 +1,18 @@
+{
+  "objectives": [
+    "misc",
+    "fix"
+  ],
+  "paths": [
+    "tests/ub_safe"
+  ],
+  "wave": 526,
+  "batch": 0,
+  "link_unit": "libgit2",
+  "module": null,
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-526",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api",
+  "instructions": "instructions.md"
+}
