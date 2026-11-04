@@ -1,0 +1,25 @@
+{
+  "objective": "wrap",
+  "items": [
+    {
+      "name": "git_checkout_perfdata",
+      "defined_in": "include/git2/checkout.h",
+      "kind": "type",
+      "field_anchors": [
+        "stat_calls",
+        "chmod_calls",
+        "mkdir_calls"
+      ],
+      "home": "src/libgit2/src/libgit2/checkout.rs"
+    }
+  ],
+  "wave": 330,
+  "batch": 0,
+  "link_unit": "libgit2",
+  "module": "src/libgit2/checkout.c",
+  "foundational": false,
+  "base_branch": "crustify/waves/wave-330",
+  "model": "openrouter/anthropic/claude-opus-5.5",
+  "billing": "api",
+  "instructions": "instructions.md"
+}

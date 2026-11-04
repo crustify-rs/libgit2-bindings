@@ -21232,7 +21232,7 @@
       "link_unit": "libgit2",
       "module": "src/libgit2/checkout.c",
       "foundational": false,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
           329
@@ -21249,7 +21249,7 @@
         {
           "index": 0,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_checkout_perfdata",
@@ -21263,12 +21263,14 @@
               "home": "src/libgit2/src/libgit2/checkout.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "eda4ae102da48c98745c380bdec72575edc8e723"
+          ]
         },
         {
           "index": 1,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_checkout_progress_cb",
@@ -21278,7 +21280,9 @@
               "home": "src/libgit2/src/libgit2/checkout.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "3b654f0974777080db1353321cc65669dc55bcd4"
+          ]
         }
       ]
     },
