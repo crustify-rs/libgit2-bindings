@@ -5466,7 +5466,7 @@
       },
       "nullable": true,
       "mutable": false,
-      "note": "baseline: &delta->old_file of the checkout's diff, lent for the call and only read; NULL for added, ignored, untracked and unreadable deltas and when there is no delta (an untracked or ignored workdir item). Lent as CheckoutNotification::baseline, an Option<DiffFileRef<'call>>."
+      "note": "baseline: &delta->old_file of the checkout's diff, lent for the call and only read; NULL for added, ignored, untracked and unreadable deltas, and when there is no delta: an untracked or ignored workdir item, or a dirty one the index tracks outside the checkout's diff (checkout_action_wd_only, checkout.c:413-415). Lent as CheckoutNotification::baseline, an Option<DiffFileRef<'call>>."
      }
     },
     {
@@ -5483,7 +5483,7 @@
       },
       "nullable": true,
       "mutable": false,
-      "note": "target: &delta->new_file of the checkout's diff, lent for the call and only read; NULL for deleted deltas and when there is no delta. Lent as CheckoutNotification::target, an Option<DiffFileRef<'call>>."
+      "note": "target: &delta->new_file of the checkout's diff, lent for the call and only read; NULL for deleted deltas and when there is no delta (the workdir-only notifications of checkout_action_wd_only). Lent as CheckoutNotification::target, an Option<DiffFileRef<'call>>."
      }
     },
     {
@@ -5500,7 +5500,7 @@
       },
       "nullable": true,
       "mutable": false,
-      "note": "workdir: a git_diff_file on checkout_notify's own stack, filled from the workdir index entry (id, path borrowed from the entry, size, mode, VALID_ID), so valid for the call only; NULL when the path is missing on disk. Lent as CheckoutNotification::workdir, an Option<DiffFileRef<'call>>."
+      "note": "workdir: a git_diff_file on checkout_notify's own stack, filled from the workdir index entry (id, path borrowed from the entry, size, mode, VALID_ID), so valid for the call only. Not only a file: a directory's entry has mode GIT_FILEMODE_TREE and a path ending in '/'. NULL when the caller passes no workdir item: the path is missing on disk (checkout_action_no_wd), or a directory stands where the baseline and target keep the same file, notified DIRTY with the delta but without it (checkout_action_with_wd_dir, checkout.c:612-617; the directory is then notified UNTRACKED on its own). Lent as CheckoutNotification::workdir, an Option<DiffFileRef<'call>>."
      }
     },
     {

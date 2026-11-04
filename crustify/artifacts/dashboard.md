@@ -61,9 +61,9 @@ in Notes.
 |---|---:|---:|---:|---:|
 | UB safe tests | `806` | — | `35.80`% | `84.57`% |
 | UB unsafe tests | `100` | — | `22.20`% | `12.70`% |
-| Equiv tests | `488` | — | `43.73`% | `76.50`% |
-| Unit tests | `786` | — | `32.13`% | `87.48`% |
-| **Total tests** | **`2180`** | — | **`46.65`%** | **`99.55`%** |
+| Equiv tests | `489` | — | `43.73`% | `76.50`% |
+| Unit tests | `787` | — | `32.13`% | `87.48`% |
+| **Total tests** | **`2182`** | — | **`46.65`%** | **`99.55`%** |
 | total types | `258` | — | — | — |
 | ported types | `0` | `0.00`% | — | — |
 | wrapped types | `105` | `40.70`% | — | — |
@@ -567,8 +567,9 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/src/libgit2/odb.c` | `177` | `0` | wrap | review | `22` | — | `+23/-2` | — | `$7.52` | `23.94M` | `28m33s` | `$0.34` | — |
 | `libgit2/src/libgit2/indexer.c` | `179` | `0` | wrap | review | `1` | — | `+35/-0` | — | `$3.18` | `8.05M` | `12m18s` | `$3.18` | — |
 | `libgit2/src/libgit2/checkout.c` | `331` | `1` | wrap | review | `1` | — | `+113/-14` | — | `$4.80` | `10.64M` | `27m50s` | `$4.80` | — |
+| `libgit2/src/libgit2/checkout.c` | `333` | `0` | wrap | review | `2` | — | `+217/-15` | — | — | — | — | — | — |
 | **Σ first** |  |  |  |  | **`415`** | **`8478`** | **`+67747/-2506`** | **`46.66`% / `99.55`%** | **`$412.21`** | **`1262.84M`** | — | **`$0.99`** | **`$0.05`** |
-| **Σ review** |  |  |  |  | **`413`** | — | **`+6857/-1311`** | **`46.64`% / `99.55`%** | **`$328.37`** | **`605.27M`** | — | **`$0.80`** | — |
+| **Σ review** |  |  |  |  | **`415`** | — | **`+7074/-1326`** | **`46.64`% / `99.55`%** | **`$328.37`** | **`605.27M`** | — | **`$0.80`** | — |
 
 ### Batches: tests
 
@@ -640,8 +641,9 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/src/libgit2/odb.c` | `177` | `0` | review | `+0` (—/— pp) | `+0` (—/— pp) | `+0` (—/— pp) | `+0` (—/— pp) |
 | `libgit2/src/libgit2/indexer.c` | `179` | `0` | review | `+0` (—/— pp) | `+0` (—/— pp) | `+0` (—/— pp) | `+1` (—/— pp) |
 | `libgit2/src/libgit2/checkout.c` | `331` | `1` | review | `+0` (—/— pp) | `+0` (—/— pp) | `+2` (—/— pp) | `+0` (—/— pp) |
+| `libgit2/src/libgit2/checkout.c` | `333` | `0` | review | `+0` (—/— pp) | `+0` (—/— pp) | `+1` (—/— pp) | `+1` (—/— pp) |
 | **Σ first** |  |  |  | **`+288` (`+10.21`/`+6.04` pp)** | **`+17` (`+3.17`/`-8.14` pp)** | **`+191` (`+8.99`/`+13.91` pp)** | **`+236` (`+11.76`/`-33.75` pp)** |
-| **Σ review** |  |  |  | **`+14` (`+0.34`/`-1.41` pp)** | **`+2` (`-0.92`/`+0.27` pp)** | **`+21` (`+0.09`/`-0.37` pp)** | **`+33` (`+2.44`/`+7.45` pp)** |
+| **Σ review** |  |  |  | **`+14` (`+0.34`/`-1.41` pp)** | **`+2` (`-0.92`/`+0.27` pp)** | **`+22` (`+0.09`/`-0.37` pp)** | **`+34` (`+2.44`/`+7.45` pp)** |
 
 ### Batches: safety audit
 
@@ -715,6 +717,7 @@ Deterministic `ffimap`; no model.
 | `libgit2/src/libgit2/odb.c` | `177` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `+0` | `+0` | — | `+0` | `+0` |
 | `libgit2/src/libgit2/indexer.c` | `179` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `-0.00` pp | `+0` | `+0` | — | `+0` | `+0` |
 | `libgit2/src/libgit2/checkout.c` | `331` | `1` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `+0` | `+0` | — | `+0` | `+0` |
+| `libgit2/src/libgit2/checkout.c` | `333` | `0` | wrap | review | `+0` | `+0` | `+0` | `+0` | — | — | `+0.00` pp | `+0` | `+0` | — | `+0` | `+0` |
 | **Σ first** |  |  |  |  | **`+1`** | **`+1`** | **`-2`** | **`+41`** | — | — | **`+18.18` pp** | **`+582`** | — | — | **`+6`** | **`+15`** |
 | **Σ review** |  |  |  |  | **`+0`** | **`+0`** | **`+0`** | **`+1`** | — | — | **`-0.38` pp** | **`+19`** | — | — | **`+0`** | **`-1`** |
 
@@ -751,7 +754,8 @@ Deterministic `ffimap`; no model.
 | `libgit2/src/libgit2/odb.c` | `177` | `0` | `+1` | `+0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+1` | `2` |
 | `libgit2/src/libgit2/indexer.c` | `179` | `0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+1` | `+0` | `+0` | `1` |
 | `libgit2/src/libgit2/checkout.c` | `331` | `1` | `+0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+1` | `1` |
-| **Σ** |  |  | **`+1`** | **`+5`** | **`+3`** | **`+1`** | **`+3`** | **`+5`** | **`+11`** | **`+48`** | **`77`** |
+| `libgit2/src/libgit2/checkout.c` | `333` | `0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+0` | `+2` | `2` |
+| **Σ** |  |  | **`+1`** | **`+5`** | **`+3`** | **`+1`** | **`+3`** | **`+5`** | **`+11`** | **`+50`** | **`79`** |
 
 ## Notes
 
@@ -1541,6 +1545,71 @@ changed. The new test was run alone under Miri and stops at `git_libgit2_init`. 
 in this module, and the review emitted no reproducer, so BSan did not run. `cargo test
 --workspace --no-fail-fast` fails only on the five compile-fail snapshots that the ffibox pin
 drift breaks.
+
+### `libgit2/src/libgit2/checkout.c` wave 333: review of wave 332
+
+Wave 333 batch 0 reviews wave 332 batch 0's `NotifyCallback` and `PerfdataCallback`
+(`b694c3653`) and files two reports, both under `+misc`. The first,
+`checkout-notify-repeats-and-workdir-side`, concerns the module docs and `NotifyCallback`'s
+docs, which promised one call per path, and `CheckoutNotification::workdir`, documented as
+`None` only for a path missing on disk. Where a directory stands in place of a file that the
+baseline and the target share, `checkout_action_with_wd_dir` (`checkout.c:612-617`)
+notifies the file as dirty with no working-directory side. It then notifies the directory,
+as `a.txt/`, as untracked, and the workdir walk notifies it again. Under
+`GIT_CHECKOUT_FORCE`, the file is also notified as updated, with the directory as its
+working-directory side. The docs of the four fields now state when each is `None`, and that
+a side can be a directory. The second, a `wavefront` report,
+`checkout-notify-cb-side-notes`, concerns the store's notes on `git_checkout_notify_cb`'s
+baseline, target and workdir sides, which repeated the claim and missed the workdir-only
+dirty case (`checkout.c:413-415`). The same properties are resubmitted with complete notes.
+
+The lifecycle, unsafety, contracts, UB, equivalence, internal and conventions checks found
+nothing more:
+- Callbacks have no lifecycle routines.
+- The batch adds no public `unsafe fn` and no raw pointer to the public interface. The
+  options' raw callback setters and getters are an earlier wave's seams, and their contracts
+  still hold.
+- The trampolines' `&mut` over the payload aliases nothing: `walk_with` lends a pointer
+  derived from `&mut self` and uses `self` only once the walk returns.
+- The closures are higher-ranked over every lent borrow, so nothing escapes the call, as the
+  compile-fail cases check.
+- libgit2 never passes NULL `path` or `perfdata`, and the trampolines tolerate it anyway.
+- The callbacks are neither `Send` nor `Sync`.
+
+`+LoC` is the doc fix and the two new tests. Two C branches had no test, ignored files
+(`checkout.c:438-448`) and a directory in place of a kept file (`checkout.c:612-617`):
+- `a_directory_in_place_of_a_kept_file_is_notified_more_than_once` drives the real trampoline
+  through `walk_with` over both branches, safe and forced. It is a unit test, `+1`.
+- `a_notify_callback_sees_directories_and_ignored_files_as_a_c_callback` compares a
+  `NotifyCallback` with C callbacks call for call over the same steps and a cancel. It is
+  an `equiv` test, `+1`, and passed in 5 of 5 runs.
+
+Ignore rules apply from the repository's working directory, not a `target_directory`, so the
+unit test writes `.git/info/exclude`. The `equiv` harness's `Step` gains a `prepare` hook.
+
+The `cov (C/Rust)` cells stay `—`, for wave 172's reason. No non-test code changed, and
+wave 332 measured `checkout.rs` at 100% of lines, functions and regions. The safety audit row
+compares binder run 102's scan (`b694c3653`, the Rust of the wave tip, which an `ffimap`
+rerun on `9dacc279e` matched counter for counter) with a scan of this tree. Only the
+`code.tests.*` counters change.
+
+The Miri gate passed on the wave tip: `lib` 366, `ub_safe` 184, `ub_unsafe` 18 and `equiv` 32
+passed, and the tests that call C were ignored. It passed again on the fixed tree with the same counts. The two new tests are marked `ignore` there: each was run alone under Miri and stops at `git_libgit2_init`. The checkout unit, `ub_safe`
+and `equiv` tests pass under ASan+UBSan and TSan. This wave is not the module's last (waves
+334 and 356 follow), and the review emitted no reproducer, so BSan did not run.
+`cargo test --workspace --no-fail-fast` fails only on the five compile-fail snapshots that
+the ffibox pin drift breaks. `ub_unsafe` and the doctests pass.
+
+Reviewer run 130 reviewed the batch beside review wave 331, so its commits could not be
+promoted. Run 131 replayed them onto wave 331's landing, keeping both sides of the conflicts:
+wave 331's `equiv` perfdata and progress tests beside this batch's notify test, and both
+batches' dashboard rows, with the `Σ` rows and the Coverage stats counts recounted. On the
+resolved tree, check, fmt, clippy and `cargo test --workspace --no-fail-fast` were rerun.
+Equiv now has 489 tests and unit 787, and only the five compile-fail snapshots from the
+ffibox pin drift fail. The Miri gate's `lib` and `equiv` binaries were rerun, the two whose
+code the merge combines, and passed with 366 and 32 tests. The checkout unit, `ub_safe` and
+`equiv` tests were rerun under ASan+UBSan and TSan and pass. Neither side changed non-test
+code beyond docs, so the safety audit row and the `ub_unsafe` Miri result stand.
 
 ### Parallelism and review caps from `libgit2/repository`
 

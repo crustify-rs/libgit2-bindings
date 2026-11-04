@@ -437,6 +437,8 @@ struct Step {
     perfdata: bool,
     /// A file written into the working directory before the checkout.
     write: Option<(&'static str, &'static str)>,
+    /// Run on the working directory before the checkout, after `write`.
+    prepare: Option<fn(&Path)>,
 }
 
 impl Step {
@@ -556,6 +558,9 @@ impl Step {
     ) -> Outcome {
         if let Some((path, content)) = self.write {
             fs::write(f.work.join(path), content).unwrap();
+        }
+        if let Some(prepare) = self.prepare {
+            prepare(&f.work);
         }
         *log.borrow_mut() = Log {
             cancel: match self.notify {
@@ -1923,4 +1928,100 @@ fn a_progress_callback_sees_symlinks_and_submodules_as_a_c_callback() {
     assert_eq!(progress.len(), 7, "{progress:?}");
     assert_eq!(progress[5], (Some("link".to_owned()), 5, 6));
     assert_eq!(progress[6], (Some("sub".to_owned()), 6, 6));
+}
+
+/// Puts a directory in place of `a.txt`, which the index keeps, and a file the repository
+/// ignores beside it.
+fn directory_in_place_and_ignored(work: &Path) {
+    drop(fs::remove_file(work.join("a.txt")));
+    fs::create_dir_all(work.join("a.txt")).unwrap();
+    fs::write(work.join("a.txt/inner"), "in\n").unwrap();
+    fs::write(work.join(".git/info/exclude"), "*.log\n").unwrap();
+    fs::write(work.join("x.log"), "log\n").unwrap();
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "calls libgit2")]
+fn a_notify_callback_sees_directories_and_ignored_files_as_a_c_callback() {
+    // The index against itself, in place: every change is the working directory's.
+    let watched = Step {
+        index: true,
+        baseline: Baseline::Index,
+        notify: Notify::On,
+        notify_flags: ALL,
+        perfdata: true,
+        prepare: Some(directory_in_place_and_ignored),
+        ..Step::default()
+    };
+    let steps = [
+        // Safely: the directory blocks nothing it would not remove.
+        watched,
+        // Forced: the file is also updated over the directory.
+        Step {
+            strategy: FORCE,
+            ..watched
+        },
+        // Cancelled at the dirty file, the only reason notified.
+        Step {
+            strategy: FORCE,
+            notify: Notify::Cancel(ffi::GIT_EUSER),
+            notify_flags: ffi::GIT_CHECKOUT_NOTIFY_DIRTY,
+            ..watched
+        },
+    ];
+    let outcomes = compare_callbacks("callbacks-directory", false, &steps);
+    let a = || Some("a.txt".to_owned());
+    let dirty = (
+        ffi::GIT_CHECKOUT_NOTIFY_DIRTY,
+        "a.txt".to_owned(),
+        [a(), a(), None],
+    );
+    let untracked = (
+        ffi::GIT_CHECKOUT_NOTIFY_UNTRACKED,
+        "a.txt/".to_owned(),
+        [None, None, Some("a.txt/".to_owned())],
+    );
+    let ignored = (
+        ffi::GIT_CHECKOUT_NOTIFY_IGNORED,
+        "x.log".to_owned(),
+        [None, None, Some("x.log".to_owned())],
+    );
+    let updated = (
+        ffi::GIT_CHECKOUT_NOTIFY_UPDATED,
+        "a.txt".to_owned(),
+        [a(), a(), Some("a.txt/".to_owned())],
+    );
+    let of_a = |i: usize| -> Vec<_> {
+        outcomes[i]
+            .log
+            .notify
+            .iter()
+            .filter(|(_, path, _)| path.starts_with("a.txt") || path == "x.log")
+            .cloned()
+            .collect()
+    };
+    assert_eq!(
+        of_a(0),
+        [
+            dirty.clone(),
+            untracked.clone(),
+            untracked.clone(),
+            ignored.clone()
+        ]
+    );
+    assert_eq!(
+        of_a(1),
+        [
+            dirty.clone(),
+            untracked.clone(),
+            updated,
+            untracked,
+            ignored
+        ]
+    );
+    assert_eq!(
+        (outcomes[2].rc, &outcomes[2].log.notify[..]),
+        (ffi::GIT_EUSER, &[dirty][..])
+    );
+    assert_eq!(outcomes[2].log.perfdata, []);
 }

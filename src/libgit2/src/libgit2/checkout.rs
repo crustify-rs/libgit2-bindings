@@ -65,12 +65,12 @@
 //! # Notification callbacks
 //!
 //! A [`NotifyCallback`] is a `git_checkout_notify_cb` over a Rust closure. A checkout calls
-//! one synchronously, on its own thread, while it plans and before it writes anything: once
-//! per path in a situation its [`notify_flags`](CheckoutOptionsRef::notify_flags) select,
-//! lending it the path and the baseline, target and working-directory sides of it, as
-//! [`DiffFileRef`]s, for the call alone. The closure returns [`ControlFlow::Break`] to
-//! cancel, which the callback reports as `GIT_EUSER`, the code the checkout then fails
-//! with; a panic cancels the same way and resumes once C has returned.
+//! one synchronously, on its own thread, while it plans and before it writes anything: for
+//! each path in a situation its [`notify_flags`](CheckoutOptionsRef::notify_flags) select,
+//! sometimes more than once for one path, lending it the path and the baseline, target and
+//! working-directory sides of it, as [`DiffFileRef`]s, for the call alone. The closure returns
+//! [`ControlFlow::Break`] to cancel, which the callback reports as `GIT_EUSER`, the code the
+//! checkout then fails with; a panic cancels the same way and resumes once C has returned.
 //!
 //! # Performance-data callbacks
 //!
@@ -1313,15 +1313,22 @@ pub struct CheckoutNotification<'a> {
     /// The one `GIT_CHECKOUT_NOTIFY_*` bit naming the situation: a conflict, a dirty file,
     /// an update, an untracked or an ignored file.
     pub why: u32,
-    /// The path, relative to the working directory. libgit2 always passes one; a NULL
-    /// path is read as `None` rather than invented.
+    /// The path, relative to the working directory, with a trailing `/` for a directory.
+    /// libgit2 always passes one; a NULL path is read as `None` rather than invented.
     pub path: Option<&'a CStr>,
-    /// The file the working directory was expected to hold; `None` for a path the
-    /// baseline does not have.
+    /// The baseline's side of a change the checkout plans: the file the working directory
+    /// was expected to hold. `None` for a path the baseline does not have, and for a
+    /// notification about the working directory alone (an untracked or ignored item, or a
+    /// dirty file outside the checkout's changes).
     pub baseline: Option<DiffFileRef<'a>>,
-    /// The file the checkout writes; `None` for a path it removes.
+    /// The target's side of a change the checkout plans: the file it checks out. `None`
+    /// for a path the target deletes, and for a notification about the working directory
+    /// alone.
     pub target: Option<DiffFileRef<'a>>,
-    /// The file found in the working directory; `None` for a path missing on disk.
+    /// What the working directory holds at the path: a file, or a directory (mode
+    /// `GIT_FILEMODE_TREE`). `None` when nothing is there, and also when a directory
+    /// stands where the baseline and the target have the same file: libgit2 then notifies
+    /// that file as dirty without this side, before it notifies the directory.
     pub workdir: Option<DiffFileRef<'a>>,
 }
 
@@ -1351,10 +1358,15 @@ type NotifyFn<'f> = dyn FnMut(CheckoutNotification<'_>) -> ControlFlow<()> + 'f;
 /// Built over a closure with [`new`](Self::new). libgit2 calls it synchronously, on the
 /// thread running the checkout, while it plans what to do and before it writes anything
 /// (a dry run plans, so it notifies too):
-/// once per conflicting, dirty, updated, untracked or ignored path, with a
+/// for each conflicting, dirty, updated, untracked or ignored path it meets, with a
 /// [`CheckoutNotification`]: the `GIT_CHECKOUT_NOTIFY_*` bit naming the situation, the
-/// path, and the sides of it that exist, each a [`DiffFileRef`]. Everything is lent for the
-/// call only, so the closure receives borrows that cannot outlive the call.
+/// path, and the sides of it that libgit2 compared, each a [`DiffFileRef`]. Everything is
+/// lent for the call only, so the closure receives borrows that cannot outlive the call.
+///
+/// One path can come more than once. Where a directory stands in place of a file the
+/// checkout keeps, libgit2 notifies the file as dirty, without a working-directory side,
+/// and under `GIT_CHECKOUT_FORCE` as updated, with the directory as that side; it notifies
+/// the directory itself, as `<path>/`, as untracked twice.
 ///
 /// The closure returns [`ControlFlow::Continue`] to go on and [`ControlFlow::Break`] to
 /// cancel, which the trampoline reports as `GIT_EUSER`: the checkout stops before
@@ -2163,6 +2175,8 @@ mod unit_tests {
         const UPDATED: u32 = ffi::GIT_CHECKOUT_NOTIFY_UPDATED;
         const UNTRACKED: u32 = ffi::GIT_CHECKOUT_NOTIFY_UNTRACKED;
         const CONFLICT: u32 = ffi::GIT_CHECKOUT_NOTIFY_CONFLICT;
+        const DIRTY: u32 = ffi::GIT_CHECKOUT_NOTIFY_DIRTY;
+        const IGNORED: u32 = ffi::GIT_CHECKOUT_NOTIFY_IGNORED;
         const USER: c_int = ffi::GIT_EUSER;
 
         /// One side of a notification, as owned data: its path, mode and size.
@@ -2216,7 +2230,20 @@ mod unit_tests {
             notify: &mut NotifyCallback<'_>,
             perfdata: &mut PerfdataCallback<'_>,
         ) -> c_int {
+            checkout_against(staged, target, strategy, None, notify, perfdata)
+        }
+
+        /// [`checkout`], against `baseline` rather than `HEAD` when it is given.
+        fn checkout_against(
+            staged: &Staged,
+            target: &CStr,
+            strategy: u32,
+            baseline: Option<IndexRef<'_>>,
+            notify: &mut NotifyCallback<'_>,
+            perfdata: &mut PerfdataCallback<'_>,
+        ) -> c_int {
             let mut options = CheckoutOptions::new();
+            options.as_mut().set_baseline_index(baseline);
             options.as_mut().set_strategy(strategy);
             options
                 .as_mut()
@@ -2356,6 +2383,80 @@ mod unit_tests {
                 }
             }
             assert_eq!(fs::read(path.join("a.txt")).unwrap(), b"changed\n");
+        }
+
+        /// A notification's reason, path and sides, each side as its path and mode: a
+        /// directory's size is the filesystem's.
+        type Shape = (u32, Option<CString>, [Option<(Option<CString>, u16)>; 3]);
+
+        /// A directory standing in place of a file the baseline and the target share, and
+        /// a file the repository ignores, checked out against the index itself, safely and
+        /// forced. The file is notified as dirty without a working-directory side, and
+        /// when forced as updated too, with the directory as that side; the directory, as
+        /// `a.txt/`, is notified as untracked twice; the ignored file as ignored.
+        #[test]
+        #[cfg_attr(miri, ignore = "calls C")]
+        fn a_directory_in_place_of_a_kept_file_is_notified_more_than_once() {
+            let staged = Staged::new("notify-dir", FILES);
+            // Ignore rules are the repository's, not the target directory's.
+            fs::write(staged.dir.join("work/.git/info/exclude"), "*.log\n").unwrap();
+            // SAFETY: the fixture's live index, which outlives every checkout below.
+            let index = unsafe { IndexRef::from_ptr(staged.index) };
+            let side = |p: &CStr, mode| Some((Some(p.to_owned()), mode));
+            let (file, dir) = (side(c"a.txt", 0o100_644), side(c"a.txt/", 0o040_000));
+            let a = Some(c"a.txt".to_owned());
+            let dirty: Shape = (DIRTY, a.clone(), [file.clone(), file.clone(), None]);
+            let updated: Shape = (UPDATED, a, [file.clone(), file, dir.clone()]);
+            let untracked: Shape = (UNTRACKED, Some(c"a.txt/".to_owned()), [None, None, dir]);
+            let log = side(c"x.log", 0o100_644);
+            let ignored: Shape = (IGNORED, Some(c"x.log".to_owned()), [None, None, log]);
+            let safe = vec![
+                dirty.clone(),
+                untracked.clone(),
+                untracked.clone(),
+                ignored.clone(),
+            ];
+            let forced = vec![dirty, untracked.clone(), updated, untracked, ignored];
+            for (strategy, expected) in [(0, safe), (FORCE, forced)] {
+                let (path, target) = staged.target(&format!("out-{strategy}"));
+                for (name, content) in FILES {
+                    let file = path.join(name);
+                    fs::create_dir_all(file.parent().unwrap()).unwrap();
+                    fs::write(file, content).unwrap();
+                }
+                fs::remove_file(path.join("a.txt")).unwrap();
+                fs::create_dir(path.join("a.txt")).unwrap();
+                fs::write(path.join("a.txt/inner"), "in\n").unwrap();
+                fs::write(path.join("x.log"), "log\n").unwrap();
+                let mut shapes = Vec::new();
+                let mut record = |n: CheckoutNotification<'_>| {
+                    let (why, path, sides) = (n.why, n.path.map(CStr::to_owned), n);
+                    let side = |f: Option<DiffFileRef<'_>>| {
+                        f.map(|f| (f.path().map(CStr::to_owned), f.mode()))
+                    };
+                    let sides = [
+                        side(sides.baseline),
+                        side(sides.target),
+                        side(sides.workdir),
+                    ];
+                    shapes.push((why, path, sides));
+                    ControlFlow::Continue(())
+                };
+                let mut ignore = |_: CheckoutPerfdataRef<'_>| {};
+                let mut notify = NotifyCallback::new(&mut record);
+                let mut perfdata = PerfdataCallback::new(&mut ignore);
+                let rc = checkout_against(
+                    &staged,
+                    &target,
+                    strategy,
+                    index,
+                    &mut notify,
+                    &mut perfdata,
+                );
+                drop((notify, perfdata));
+                assert_eq!(rc, 0, "{strategy:#x}");
+                assert_eq!(shapes, expected, "{strategy:#x}");
+            }
         }
 
         #[test]
