@@ -25,8 +25,12 @@ case $variant in
   plain)
     exec cargo "$@" ;;
   coverage)
-    # Rust coverage via cargo-llvm-cov; the C side writes gcov data into the coverage build.
-    exec cargo llvm-cov "$@" ;;
+    # Source-based coverage on the pinned nightly, against the variant's clang-instrumented C;
+    # crustify/scripts/coverage/ measures the suites as the testing spec's Coverage section does.
+    export RUSTFLAGS="${RUSTFLAGS:-} -C instrument-coverage"
+    export RUSTDOCFLAGS="${RUSTDOCFLAGS:-} -C instrument-coverage"
+    export LLVM_PROFILE_FILE=${LLVM_PROFILE_FILE:-$CARGO_TARGET_DIR/profraw/%p-%m.profraw}
+    exec cargo "+$nightly" "${pre[@]}" --target $host "${post[@]}" ;;
   asan-ubsan)
     export RUSTFLAGS="${RUSTFLAGS:-} -Zsanitizer=address -Cforce-frame-pointers=yes"
     export RUSTDOCFLAGS="${RUSTDOCFLAGS:-} -Zsanitizer=address"
