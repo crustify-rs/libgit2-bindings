@@ -21384,7 +21384,7 @@
       "module": "src/libgit2/checkout.c",
       "foundational": false,
       "reviews": 332,
-      "status": "wip",
+      "status": "done",
       "depends_on": {
         "scheduled": [
           332
@@ -21401,11 +21401,14 @@
         {
           "index": 0,
           "kind": "review",
-          "status": "wip",
+          "status": "done",
           "reviews": [
             0
           ],
-          "commits": []
+          "commits": [
+            "3381f4357eed513963843b9af096b380c7272bca",
+            "b173c5195acc7f798682ab1088204eb614e70c98"
+          ]
         }
       ]
     },

@@ -567,9 +567,9 @@ Review rows: `openrouter/anthropic/claude-fable-5.1` via `claude` through `libgi
 | `libgit2/src/libgit2/odb.c` | `177` | `0` | wrap | review | `22` | — | `+23/-2` | — | `$7.52` | `23.94M` | `28m33s` | `$0.34` | — |
 | `libgit2/src/libgit2/indexer.c` | `179` | `0` | wrap | review | `1` | — | `+35/-0` | — | `$3.18` | `8.05M` | `12m18s` | `$3.18` | — |
 | `libgit2/src/libgit2/checkout.c` | `331` | `1` | wrap | review | `1` | — | `+113/-14` | — | `$4.80` | `10.64M` | `27m50s` | `$4.80` | — |
-| `libgit2/src/libgit2/checkout.c` | `333` | `0` | wrap | review | `2` | — | `+217/-15` | — | — | — | — | — | — |
+| `libgit2/src/libgit2/checkout.c` | `333` | `0` | wrap | review | `2` | — | `+217/-15` | — | `$11.03` | `25.98M` | `47m17s` | `$5.51` | — |
 | **Σ first** |  |  |  |  | **`415`** | **`8478`** | **`+67747/-2506`** | **`46.66`% / `99.55`%** | **`$412.21`** | **`1262.84M`** | — | **`$0.99`** | **`$0.05`** |
-| **Σ review** |  |  |  |  | **`415`** | — | **`+7074/-1326`** | **`46.64`% / `99.55`%** | **`$328.37`** | **`605.27M`** | — | **`$0.80`** | — |
+| **Σ review** |  |  |  |  | **`415`** | — | **`+7074/-1326`** | **`46.64`% / `99.55`%** | **`$339.40`** | **`631.25M`** | — | **`$0.82`** | — |
 
 ### Batches: tests
 
@@ -1562,6 +1562,8 @@ a side can be a directory. The second, a `wavefront` report,
 `checkout-notify-cb-side-notes`, concerns the store's notes on `git_checkout_notify_cb`'s
 baseline, target and workdir sides, which repeated the claim and missed the workdir-only
 dirty case (`checkout.c:413-415`). The same properties are resubmitted with complete notes.
+
+Its usage cells sum two runs. Reviewer run 130 reviewed wave 332 beside review wave 331, from the same base on its own integration branch, so its fix conflicted with 331's landing and could not be promoted; reviewer run 131 replayed its two commits onto 331's landing, kept both sides of the conflicts, ran the gates again and landed them ($9.40 and $1.63).
 
 The lifecycle, unsafety, contracts, UB, equivalence, internal and conventions checks found
 nothing more:
