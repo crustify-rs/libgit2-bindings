@@ -1,0 +1,11 @@
+error[E0597]: `counts` does not live long enough
+  --> tests/ub_safe/compile_fail/checkout_perfdata_ref_outlives_value.rs:8:18
+   |
+ 7 |         let counts = CheckoutPerfdata::default();
+   |             ------ binding `counts` declared here
+ 8 |         handle = counts.as_ref();
+   |                  ^^^^^^ borrowed value does not live long enough
+ 9 |     }
+   |     - `counts` dropped here while still borrowed
+10 |     let _ = handle.stat_calls();
+   |             ------ borrow later used here

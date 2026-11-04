@@ -20,13 +20,21 @@
 //!
 //! Every test builds its options through `git_checkout_options_init`, so Miri skips
 //! them; the inline unit tests run the accessors under Miri over a Rust-built value.
+//!
+//! [`CheckoutPerfdata`] holds three plain counters, which Rust values are built, copied
+//! and read through without C: its handles reborrow and are read and written in turn
+//! (Miri, `BSan`), copies cross threads and a shared value is read from several at once
+//! (`TSan`, for its `Send` and `Sync`). A handle outliving its value, or a shared handle
+//! beside the exclusive one, is in `compile_fail/`.
 
 use std::ffi::{CStr, CString};
 use std::sync::Barrier;
 use std::thread;
 
+use ffibox::CZeroable;
 use libgit2::libgit2::src::libgit2::checkout::{
-    CheckoutOptions, CheckoutOptionsMut, CheckoutOptionsRef,
+    CheckoutOptions, CheckoutOptionsMut, CheckoutOptionsRef, CheckoutPerfdata, CheckoutPerfdataMut,
+    CheckoutPerfdataRef,
 };
 use libgit2::libgit2::src::libgit2::index::{Index, IndexArc};
 use libgit2::libgit2::src::libgit2::libgit2 as global;
@@ -538,4 +546,80 @@ fn options_sharing_a_baseline_tree_are_dropped_before_it() {
     }
     drop(tree);
     drop(repo);
+}
+
+fn perfdata_counts(r: CheckoutPerfdataRef<'_>) -> (usize, usize, usize) {
+    (r.mkdir_calls(), r.stat_calls(), r.chmod_calls())
+}
+
+fn bump(mut m: CheckoutPerfdataMut<'_>) {
+    let r = m.as_ref();
+    let (mkdir, stat, chmod) = perfdata_counts(r);
+    m.set_mkdir_calls(mkdir + 1);
+    m.set_stat_calls(stat + 1);
+    m.set_chmod_calls(chmod + 1);
+}
+
+#[test]
+fn perfdata_handles_reborrow_and_read_their_writes() {
+    let mut d = CheckoutPerfdata::zeroed();
+    let mut m = d.as_mut();
+    bump(m.as_mut());
+    assert_eq!(perfdata_counts(m.as_ref()), (1, 1, 1));
+    bump(m.as_mut());
+    m.set_stat_calls(usize::MAX);
+    let shared = m.as_ref();
+    let again = shared;
+    assert_eq!(perfdata_counts(again), (2, usize::MAX, 2));
+    assert_eq!(perfdata_counts(d.as_ref()), (2, usize::MAX, 2));
+    let copy = d.as_ref().copied();
+    d.as_mut().set_stat_calls(5);
+    bump(d.as_mut());
+    assert_eq!(perfdata_counts(copy.as_ref()), (2, usize::MAX, 2));
+    assert_eq!(perfdata_counts(d.as_ref()), (3, 6, 3));
+}
+
+#[test]
+fn perfdata_copies_cross_threads_and_shared_values_are_read_concurrently() {
+    let mut d = CheckoutPerfdata::default();
+    d.as_mut().set_mkdir_calls(7);
+    d.as_mut().set_stat_calls(11);
+    let shared = &d;
+    let handle = d.as_ref();
+    let barrier = Barrier::new(4);
+    thread::scope(|s| {
+        for _ in 0..2 {
+            s.spawn(|| {
+                barrier.wait();
+                for _ in 0..100 {
+                    assert_eq!(perfdata_counts(shared.as_ref()), (7, 11, 0));
+                }
+            });
+            s.spawn(|| {
+                barrier.wait();
+                for _ in 0..100 {
+                    assert_eq!(perfdata_counts(handle), (7, 11, 0));
+                }
+            });
+        }
+    });
+    let moved = thread::spawn(move || {
+        let mut d = d;
+        bump(d.as_mut());
+        d
+    })
+    .join()
+    .unwrap();
+    assert_eq!(perfdata_counts(moved.as_ref()), (8, 12, 1));
+    assert_eq!(
+        perfdata_counts(d.as_ref()),
+        (7, 11, 0),
+        "the thread moved a copy"
+    );
+    let mut exclusive = moved;
+    let m = exclusive.as_mut();
+    thread::scope(|s| {
+        s.spawn(move || bump(m));
+    });
+    assert_eq!(perfdata_counts(exclusive.as_ref()), (9, 13, 2));
 }

@@ -457,6 +457,28 @@
    "_comment_user": "Public options struct, caller-owned by value (stack or Rust storage); libgit2 never allocates or frees one it hands out. Init: git_checkout_options_init(opts, GIT_CHECKOUT_OPTIONS_VERSION) memcpys GIT_CHECKOUT_OPTIONS_INIT ({1}, rest zero) and fails (-1, GIT_ERROR_INVALID 'invalid version N on git_checkout_options') without touching *opts for version 0 or > 1; with version 1 it reaches no global, allocator or TLS. No destructor, disposer or cloner: every consumer takes `const git_checkout_options *` and copies by value (checkout_data_init memmoves it into data->opts, reset/worktree/merge/stash/cherrypick/revert copy and patch their local copy). Only internal copies own pointees: checkout_data owns `baseline` when it looked HEAD up itself (opts_free_baseline), and rebase_init_operation's rebase->options copy git_tree_dups `baseline` and git__strdups target_directory and the three labels, all released by git_rebase_free. C defects there (for the git_rebase batch): rebase memcpys `baseline_index` without a reference yet git_rebase_free calls git_index_free on it (drops the caller's reference); it keeps the caller's `paths` array, callbacks and payloads past the call; and its GIT_ERROR_CHECK_ALLOC tests the source label, not the copy. Wrapped in workdir/checkout.rs as the hand-written lifetime-carrying CheckoutOptions<'o> (+ Ref<'a,'o>/Mut<'a,'o>): strings, paths and baseline_index (as IndexRef<'o>) borrowed for 'o through safe setters; baseline and the callbacks+payloads as unsafe raw seams until git_tree and the checkout callbacks are wrapped."
   },
   {
+   "name": "git_checkout_perfdata",
+   "defined_in": "include/git2/checkout.h",
+   "_comment_user": "Plain 24-byte value of three size_t counters, no pointers and no lifecycle routines (--lifecycle-ops is empty). Its only producer, git_checkout_iterator, holds it inside its zero-initialised checkout_data and accumulates into it (stat_calls in mkpath2file, blob_content_to_file, blob_content_to_link, checkout_submodule_update_index and checkout_safe_for_update_only; all three from each git_futils_mkdir_relative call's own perfdata via checkout_mkdir). It is lent to opts.perfdata_cb as const git_checkout_perfdata * once, after a successful checkout, valid for the call only and unwritten during it. Checkout never passes GIT_MKDIR_CHMOD*, so chmod_calls is always 0 from libgit2.",
+   "fields": [
+    {
+     "name": "chmod_calls",
+     "refcount": false,
+     "locked_by": null
+    },
+    {
+     "name": "mkdir_calls",
+     "refcount": false,
+     "locked_by": null
+    },
+    {
+     "name": "stat_calls",
+     "refcount": false,
+     "locked_by": null
+    }
+   ]
+  },
+  {
    "name": "git_commit",
    "defined_in": "src/libgit2/commit.h",
    "fields": [

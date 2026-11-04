@@ -36,6 +36,14 @@
 //! baseline index as given, and `git_rebase_free` releases that index without having
 //! taken a reference to it. Their wrappers must keep what the copy borrows alive for
 //! the rebase, and must not hand them a baseline index.
+//!
+//! # Performance data
+//!
+//! A checkout that succeeds reports the filesystem calls it made to its performance-data
+//! callback as a `git_checkout_perfdata`: three counters, zeroed when the checkout starts,
+//! held in its own state and lent to the callback for the call. Rust reads them through a
+//! [`CheckoutPerfdataRef`], and holds a copy, or a value of its own, as a
+//! [`CheckoutPerfdata`].
 
 use core::ffi::{CStr, c_int, c_void};
 use core::fmt;
@@ -43,7 +51,7 @@ use core::marker::PhantomData;
 use core::mem::MaybeUninit;
 use core::ptr::{self};
 
-use ffibox::{CBorrowedPtr, CCell, CMutSeam, CRefSeam};
+use ffibox::{CBorrowedPtr, CCell, CMutSeam, CRefSeam, CZeroable, define_ctype};
 
 use crate::ffi;
 use crate::libgit2::src::libgit2::index::IndexRef;
@@ -720,7 +728,8 @@ impl<'o> CheckoutOptionsMut<'_, 'o> {
 
     /// Sets the performance-data callback and the payload it is passed; `None` calls
     /// nothing. libgit2 calls it once a checkout succeeds, with counts of the
-    /// `mkdir`, `stat` and `chmod` calls it made.
+    /// `mkdir`, `stat` and `chmod` calls it made, which the callback reads by borrowing a
+    /// [`CheckoutPerfdataRef`] over its `perfdata` argument for the call.
     ///
     /// Raw seam: the callback is `git_checkout_perfdata_cb`, which this crate does not
     /// wrap yet.
@@ -915,6 +924,193 @@ impl fmt::Debug for CheckoutOptionsMut<'_, '_> {
 const _: () = assert!(
     size_of::<CheckoutOptions<'_>>() == size_of::<ffi::git_checkout_options>()
         && align_of::<CheckoutOptions<'_>>() == align_of::<ffi::git_checkout_options>()
+);
+
+define_ctype!(
+    /// The counts of filesystem calls a checkout made, as libgit2 reports them to the
+    /// [performance-data callback](CheckoutOptionsMut::set_perfdata_callback): its `mkdir`,
+    /// `stat` and `chmod` calls.
+    ///
+    /// Plain data: three counters, no pointer and nothing to release. libgit2 counts into
+    /// one zeroed at the start of each checkout, inside the checkout's own state, and lends
+    /// it to the callback for the call only, as a `const git_checkout_perfdata *`: a
+    /// [`CheckoutPerfdataRef`] borrowed for the callback reads it there
+    /// ([`CRefSeam::from_ptr`]), and [`copied`](CheckoutPerfdataRef::copied) keeps the
+    /// counts beyond it. A value Rust holds is built with [`zeroed`](CZeroable::zeroed) (or
+    /// [`Default`]) and is `Copy`, like the C struct.
+    ///
+    /// Wraps `ty::git_checkout_perfdata`
+    #[doc(alias = "git_checkout_perfdata")]
+    #[derive(Clone, Copy)]
+    CheckoutPerfdata,
+    CheckoutPerfdataRef,
+    CheckoutPerfdataMut,
+    ffi::git_checkout_perfdata
+);
+
+// SAFETY: three `size_t` counters, all zero being "no call counted yet": the state libgit2
+// starts every checkout's counts from (`checkout_data data = {0}`), and a value every
+// accessor reads. Nothing frees it.
+unsafe impl CZeroable for CheckoutPerfdata {}
+
+// SAFETY: a `CheckoutPerfdata` is three plain `usize`s: no pointer, no interior mutability,
+// no thread affinity, nothing to release, so moving one to another thread moves bytes.
+unsafe impl Send for CheckoutPerfdata {}
+
+// SAFETY: `CheckoutPerfdataMut` is an exclusive borrow of such a value, as
+// `&mut CheckoutPerfdata`.
+unsafe impl Send for CheckoutPerfdataMut<'_> {}
+
+// SAFETY: shared access only reads the counters (every write goes through
+// `CheckoutPerfdataMut`, which excludes other handles, and libgit2 writes none while it
+// lends them to its callback), so concurrent readers race nothing.
+unsafe impl Sync for CheckoutPerfdata {}
+
+// SAFETY: as above; `CheckoutPerfdataRef` is a shared borrow, as `&CheckoutPerfdata`.
+unsafe impl Send for CheckoutPerfdataRef<'_> {}
+
+// SAFETY: as above.
+unsafe impl Sync for CheckoutPerfdataRef<'_> {}
+
+// SAFETY: `&CheckoutPerfdataMut` only reaches the getters, through `as_ref`.
+unsafe impl Sync for CheckoutPerfdataMut<'_> {}
+
+impl Default for CheckoutPerfdata {
+    /// No call counted: what a checkout starts from.
+    fn default() -> Self {
+        Self::zeroed()
+    }
+}
+
+impl CheckoutPerfdataRef<'_> {
+    /// How many directories the checkout created (`mkdir` calls).
+    ///
+    /// Wraps `fld::git_checkout_perfdata.mkdir_calls`
+    #[doc(alias = "git_checkout_perfdata.mkdir_calls")]
+    #[must_use]
+    pub fn mkdir_calls(&self) -> usize {
+        // SAFETY: `self.as_ptr()` addresses the live counts this handle borrows; the
+        // projection forms no reference to them.
+        let mkdir_calls_ptr = unsafe { &raw const (*self.as_ptr()).mkdir_calls };
+        // SAFETY: an initialised `size_t`, unwritten while the handle borrows it.
+        unsafe { mkdir_calls_ptr.read() }
+    }
+
+    /// How many times the checkout examined a path on disk (`stat` and `lstat` calls).
+    ///
+    /// Wraps `fld::git_checkout_perfdata.stat_calls`
+    #[doc(alias = "git_checkout_perfdata.stat_calls")]
+    #[must_use]
+    pub fn stat_calls(&self) -> usize {
+        // SAFETY: `self.as_ptr()` addresses the live counts this handle borrows; the
+        // projection forms no reference to them.
+        let stat_calls_ptr = unsafe { &raw const (*self.as_ptr()).stat_calls };
+        // SAFETY: an initialised `size_t`, unwritten while the handle borrows it.
+        unsafe { stat_calls_ptr.read() }
+    }
+
+    /// How many times the checkout changed a directory's mode (`chmod` calls).
+    ///
+    /// Wraps `fld::git_checkout_perfdata.chmod_calls`
+    #[doc(alias = "git_checkout_perfdata.chmod_calls")]
+    #[must_use]
+    pub fn chmod_calls(&self) -> usize {
+        // SAFETY: `self.as_ptr()` addresses the live counts this handle borrows; the
+        // projection forms no reference to them.
+        let chmod_calls_ptr = unsafe { &raw const (*self.as_ptr()).chmod_calls };
+        // SAFETY: an initialised `size_t`, unwritten while the handle borrows it.
+        unsafe { chmod_calls_ptr.read() }
+    }
+
+    /// A copy of the counts, which outlives the borrow: from a callback, the counts libgit2
+    /// lent it for the call.
+    #[must_use]
+    pub fn copied(&self) -> CheckoutPerfdata {
+        let mut copy = CheckoutPerfdata::zeroed();
+        let mut m = copy.as_mut();
+        m.set_mkdir_calls(self.mkdir_calls());
+        m.set_stat_calls(self.stat_calls());
+        m.set_chmod_calls(self.chmod_calls());
+        copy
+    }
+}
+
+impl CheckoutPerfdataMut<'_> {
+    /// Sets the count of directories created.
+    ///
+    /// Wraps `fld::git_checkout_perfdata.mkdir_calls`
+    #[doc(alias = "git_checkout_perfdata.mkdir_calls")]
+    pub fn set_mkdir_calls(&mut self, calls: usize) {
+        // SAFETY: `self.as_mut_ptr()` addresses the live counts this handle borrows
+        // exclusively; the projection forms no reference to them.
+        let mkdir_calls_ptr = unsafe { &raw mut (*self.as_mut_ptr()).mkdir_calls };
+        // SAFETY: a write of plain data through the exclusive handle's pointer.
+        unsafe { mkdir_calls_ptr.write(calls) }
+    }
+
+    /// Sets the count of paths examined on disk.
+    ///
+    /// Wraps `fld::git_checkout_perfdata.stat_calls`
+    #[doc(alias = "git_checkout_perfdata.stat_calls")]
+    pub fn set_stat_calls(&mut self, calls: usize) {
+        // SAFETY: `self.as_mut_ptr()` addresses the live counts this handle borrows
+        // exclusively; the projection forms no reference to them.
+        let stat_calls_ptr = unsafe { &raw mut (*self.as_mut_ptr()).stat_calls };
+        // SAFETY: a write of plain data through the exclusive handle's pointer.
+        unsafe { stat_calls_ptr.write(calls) }
+    }
+
+    /// Sets the count of directory mode changes.
+    ///
+    /// Wraps `fld::git_checkout_perfdata.chmod_calls`
+    #[doc(alias = "git_checkout_perfdata.chmod_calls")]
+    pub fn set_chmod_calls(&mut self, calls: usize) {
+        // SAFETY: `self.as_mut_ptr()` addresses the live counts this handle borrows
+        // exclusively; the projection forms no reference to them.
+        let chmod_calls_ptr = unsafe { &raw mut (*self.as_mut_ptr()).chmod_calls };
+        // SAFETY: a write of plain data through the exclusive handle's pointer.
+        unsafe { chmod_calls_ptr.write(calls) }
+    }
+}
+
+impl fmt::Debug for CheckoutPerfdataRef<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CheckoutPerfdata")
+            .field("mkdir_calls", &self.mkdir_calls())
+            .field("stat_calls", &self.stat_calls())
+            .field("chmod_calls", &self.chmod_calls())
+            .finish()
+    }
+}
+
+impl fmt::Debug for CheckoutPerfdataMut<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl fmt::Debug for CheckoutPerfdata {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
+impl PartialEq for CheckoutPerfdata {
+    /// Counter by counter.
+    fn eq(&self, other: &Self) -> bool {
+        let (a, b) = (self.as_ref(), other.as_ref());
+        a.mkdir_calls() == b.mkdir_calls()
+            && a.stat_calls() == b.stat_calls()
+            && a.chmod_calls() == b.chmod_calls()
+    }
+}
+
+impl Eq for CheckoutPerfdata {}
+
+// A `CheckoutPerfdata` is a `git_checkout_perfdata`, so a callback's pointer is one to it.
+const _: () = assert!(
+    size_of::<CheckoutPerfdata>() == size_of::<ffi::git_checkout_perfdata>()
+        && align_of::<CheckoutPerfdata>() == align_of::<ffi::git_checkout_perfdata>()
 );
 
 #[cfg(test)]
@@ -1312,5 +1508,104 @@ mod unit_tests {
         );
         let options = template();
         assert_eq!(options.as_ref().as_ptr(), ptr::from_ref(&options.0));
+    }
+
+    fn counts(mkdir: usize, stat: usize, chmod: usize) -> CheckoutPerfdata {
+        let mut d = CheckoutPerfdata::default();
+        let mut m = d.as_mut();
+        m.set_mkdir_calls(mkdir);
+        m.set_stat_calls(stat);
+        m.set_chmod_calls(chmod);
+        d
+    }
+
+    #[test]
+    fn perfdata_starts_at_zero_and_round_trips_every_counter() {
+        let mut d = CheckoutPerfdata::zeroed();
+        assert_eq!(d, CheckoutPerfdata::default());
+        let r = d.as_ref();
+        assert_eq!(
+            (r.mkdir_calls(), r.stat_calls(), r.chmod_calls()),
+            (0, 0, 0)
+        );
+        let mut m = d.as_mut();
+        m.set_mkdir_calls(3);
+        m.as_mut().set_stat_calls(usize::MAX);
+        m.set_chmod_calls(1);
+        let r = m.as_ref();
+        assert_eq!(
+            (r.mkdir_calls(), r.stat_calls(), r.chmod_calls()),
+            (3, usize::MAX, 1)
+        );
+        // Each setter writes its own field: the C struct holds them in declaration order.
+        assert_eq!(
+            (d.0.mkdir_calls, d.0.stat_calls, d.0.chmod_calls),
+            (3, usize::MAX, 1)
+        );
+    }
+
+    #[test]
+    fn perfdata_reads_a_c_struct_in_place() {
+        let raw = ffi::git_checkout_perfdata {
+            mkdir_calls: 2,
+            stat_calls: 17,
+            chmod_calls: 5,
+        };
+        // SAFETY: `raw` is a live, initialised `git_checkout_perfdata`, unwritten while the
+        // handle borrows it, as a callback's argument is.
+        let r = unsafe { CheckoutPerfdataRef::from_ptr(ptr::from_ref(&raw).cast_mut()) }.unwrap();
+        assert_eq!(
+            (r.mkdir_calls(), r.stat_calls(), r.chmod_calls()),
+            (2, 17, 5)
+        );
+        assert_eq!(r.as_ptr(), ptr::from_ref(&raw));
+        let copy = r.copied();
+        assert_eq!(copy, counts(2, 17, 5));
+        assert_ne!(ptr::from_ref(&copy).cast(), ptr::from_ref(&raw));
+        // SAFETY: NULL borrows nothing.
+        assert!(unsafe { CheckoutPerfdataRef::from_ptr(ptr::null_mut()) }.is_none());
+    }
+
+    #[test]
+    fn perfdata_copies_compare_and_print_counter_by_counter() {
+        let a = counts(1, 2, 3);
+        let mut b = a;
+        assert_eq!(a, b);
+        b.as_mut().set_chmod_calls(4);
+        assert_ne!(a, b);
+        assert_eq!(a.as_ref().chmod_calls(), 3, "a copy is independent");
+        assert_ne!(counts(9, 2, 3), a);
+        assert_ne!(counts(1, 9, 3), a);
+        let shown = "CheckoutPerfdata { mkdir_calls: 1, stat_calls: 2, chmod_calls: 3 }";
+        assert_eq!(format!("{a:?}"), shown);
+        assert_eq!(format!("{:?}", a.as_ref()), shown);
+        let mut c = a;
+        assert_eq!(format!("{:?}", c.as_mut()), shown);
+    }
+
+    #[test]
+    fn perfdata_layout_is_the_c_struct() {
+        assert_eq!(
+            size_of::<CheckoutPerfdata>(),
+            size_of::<ffi::git_checkout_perfdata>()
+        );
+        assert_eq!(size_of::<CheckoutPerfdataRef<'_>>(), size_of::<*const u8>());
+        assert_eq!(size_of::<CheckoutPerfdataMut<'_>>(), size_of::<*const u8>());
+    }
+
+    #[test]
+    fn perfdata_crosses_threads() {
+        let a = counts(1, 2, 3);
+        let r = a.as_ref();
+        let read = std::thread::scope(|s| {
+            let h = s.spawn(move || r.stat_calls());
+            let h2 = s.spawn(|| a.as_ref().mkdir_calls());
+            (h.join().unwrap(), h2.join().unwrap())
+        });
+        assert_eq!(read, (2, 1));
+        let moved = std::thread::spawn(move || a.as_ref().chmod_calls())
+            .join()
+            .unwrap();
+        assert_eq!(moved, 3);
     }
 }

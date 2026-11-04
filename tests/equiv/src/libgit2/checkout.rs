@@ -21,9 +21,12 @@ use std::process::Command;
 use std::sync::OnceLock;
 use std::{fs, ptr};
 
+use ffibox::CRefSeam;
 use glibc_bindings::libc::ffi as libc;
 use libgit2::ffi;
-use libgit2::libgit2::src::libgit2::checkout::{CheckoutOptions, CheckoutOptionsRef};
+use libgit2::libgit2::src::libgit2::checkout::{
+    CheckoutOptions, CheckoutOptionsRef, CheckoutPerfdata, CheckoutPerfdataRef,
+};
 use libgit2::libgit2::src::libgit2::index::IndexArc;
 use libgit2::libgit2::src::libgit2::repository::{InitFlag, InitOptions, Repository};
 use libgit2::libgit2::src::libgit2::strarray::StrArrayView;
@@ -1191,4 +1194,87 @@ fn umask() -> u32 {
         unsafe { libc::umask(mask) };
         mask
     }
+}
+
+/// Every reading of the `git_checkout_perfdata` libgit2 lends its callback: C's own field
+/// reads, the same counts through a [`CheckoutPerfdataRef`] borrowed for the call, and the
+/// [`CheckoutPerfdata`] copied out of it.
+#[derive(Debug, Default)]
+struct PerfdataReads {
+    c: Vec<(usize, usize, usize)>,
+    rust: Vec<(usize, usize, usize)>,
+    copies: Vec<CheckoutPerfdata>,
+}
+
+extern "C" fn perfdata_reads(data: *const ffi::git_checkout_perfdata, payload: *mut c_void) {
+    // SAFETY: the payload is the test's `RefCell<PerfdataReads>`, which outlives every
+    // checkout calling back with it.
+    let reads = unsafe { &*payload.cast::<RefCell<PerfdataReads>>() };
+    // SAFETY: libgit2 passes its live counters, which it does not write during the call.
+    let raw = unsafe { data.read() };
+    let c = (raw.mkdir_calls, raw.stat_calls, raw.chmod_calls);
+    // SAFETY: as above, so the handle may borrow them for the call.
+    let r = unsafe { CheckoutPerfdataRef::from_ptr(data.cast_mut()) }.expect("non-NULL counts");
+    let mut reads = reads.borrow_mut();
+    reads.c.push(c);
+    reads
+        .rust
+        .push((r.mkdir_calls(), r.stat_calls(), r.chmod_calls()));
+    reads.copies.push(r.copied());
+}
+
+/// A sequence of checkouts reusing one set of options, each reporting its counts: after
+/// every one, the Rust handle and its copy read what C reads.
+#[test]
+#[cfg_attr(miri, ignore = "calls C")]
+fn perfdata_reads_match_c_after_every_checkout() {
+    let f = Fixture::new("perfdata");
+    let reads = RefCell::new(PerfdataReads::default());
+    let payload = ptr::from_ref(&reads).cast_mut().cast::<c_void>();
+    let mut options = CheckoutOptions::new();
+    {
+        let mut m = options.as_mut();
+        m.set_strategy(GIT_CHECKOUT_FORCE);
+        // SAFETY: the callback reads its arguments as libgit2 passes them, and the payload
+        // is `reads`, which outlives every checkout these options run.
+        unsafe { m.set_perfdata_callback(Some(perfdata_reads), payload) };
+    }
+    // (tree, target directory, directory mode): a fresh target, an update of it, a
+    // checkout changing nothing, and another fresh target with another mode.
+    let steps = [(0, 0, 0), (1, 0, 0), (1, 0, 0), (1, 1, 0o700)];
+    for (i, &(tree, target, mode)) in steps.iter().enumerate() {
+        {
+            let mut m = options.as_mut();
+            m.set_target_directory(Some(&f.targets[target]));
+            m.set_dir_mode(mode);
+        }
+        // SAFETY: the repository and tree are the fixture's live objects, and the options
+        // are live, laid out as `git_checkout_options`, their pointers live or NULL.
+        let rc = unsafe { ffi::git_checkout_tree(f.repo, f.trees[tree].cast(), c_ptr(&options)) };
+        assert_eq!(rc, 0, "{:?}", c_last(&f.root));
+        let reads = reads.borrow();
+        assert_eq!(reads.c.len(), i + 1, "one report per checkout");
+        assert_eq!(reads.rust, reads.c);
+        let (mkdir, stat, chmod) = reads.c[i];
+        let copy = reads.copies[i];
+        assert_eq!(
+            (
+                copy.as_ref().mkdir_calls(),
+                copy.as_ref().stat_calls(),
+                copy.as_ref().chmod_calls()
+            ),
+            (mkdir, stat, chmod)
+        );
+    }
+    let reads = reads.into_inner();
+    // The checkouts exercised the counters: not a vacuous comparison.
+    assert!(
+        reads.c[0].0 > 0,
+        "a fresh target creates directories: {reads:?}"
+    );
+    assert!(reads.c[3].0 > 0, "{reads:?}");
+    assert!(reads.c.iter().all(|c| c.1 > 0), "{reads:?}");
+    // Checkout never asks `git_futils_mkdir` to chmod (no `GIT_MKDIR_CHMOD*` flag).
+    assert!(reads.c.iter().all(|c| c.2 == 0), "{reads:?}");
+    assert_ne!(reads.copies[0], reads.copies[1], "{reads:?}");
 }
