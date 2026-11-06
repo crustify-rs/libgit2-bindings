@@ -12,12 +12,12 @@
       "home": "src/libgit2/src/libgit2/diff_parse.rs"
     }
   ],
-  "wave": 228,
+  "wave": 589,
   "batch": 0,
   "link_unit": "libgit2",
   "module": "src/libgit2/diff_parse.c",
   "foundational": false,
-  "base_branch": "crustify/waves/wave-228",
+  "base_branch": "crustify/waves/wave-589",
   "model": "openrouter/anthropic/claude-opus-5.5",
   "billing": "api",
   "instructions": "instructions.md"

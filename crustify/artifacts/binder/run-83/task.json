@@ -9,12 +9,12 @@
       "home": "crustify/rust/libgit2/libgit2/index/index.rs"
     }
   ],
-  "wave": 48,
-  "batch": 8,
+  "wave": 646,
+  "batch": 3,
   "link_unit": "libgit2",
-  "module": null,
+  "module": "src/libgit2/index.c",
   "foundational": false,
-  "base_branch": "crustify/waves/wave-48",
+  "base_branch": "crustify/waves/wave-646",
   "model": "openrouter/openai/gpt-6-astra",
   "billing": "api"
 }

@@ -177,12 +177,12 @@
       "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
     }
   ],
-  "wave": 30,
-  "batch": 1,
+  "wave": 655,
+  "batch": 0,
   "link_unit": "libgit2",
-  "module": null,
+  "module": "src/libgit2/commit.c",
   "foundational": false,
-  "base_branch": "crustify/waves/wave-30",
+  "base_branch": "crustify/waves/wave-655",
   "model": "openrouter/anthropic/claude-opus-5.5",
   "billing": "api"
 }

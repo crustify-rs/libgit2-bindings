@@ -31,8 +31,8 @@
       "foundational": false,
       "layer": 0,
       "waves": [
-        524,
-        538
+        527,
+        541
       ],
       "depends_on": {
         "scheduled": [],
@@ -46,8 +46,8 @@
       "foundational": false,
       "layer": 0,
       "waves": [
-        525,
-        539
+        528,
+        542
       ],
       "depends_on": {
         "scheduled": [],
@@ -61,10 +61,10 @@
       "foundational": false,
       "layer": 0,
       "waves": [
-        526,
-        540,
-        547,
-        549
+        529,
+        543,
+        550,
+        552
       ],
       "depends_on": {
         "scheduled": [],
@@ -99,7 +99,7 @@
       "foundational": false,
       "layer": 0,
       "waves": [
-        527
+        530
       ],
       "depends_on": {
         "scheduled": [],
@@ -113,7 +113,7 @@
       "foundational": false,
       "layer": 0,
       "waves": [
-        528
+        531
       ],
       "depends_on": {
         "scheduled": [],
@@ -127,8 +127,8 @@
       "foundational": false,
       "layer": 0,
       "waves": [
-        529,
-        541
+        532,
+        544
       ],
       "depends_on": {
         "scheduled": [],
@@ -142,7 +142,7 @@
       "foundational": false,
       "layer": 0,
       "waves": [
-        530
+        533
       ],
       "depends_on": {
         "scheduled": [],
@@ -156,7 +156,7 @@
       "foundational": false,
       "layer": 0,
       "waves": [
-        531
+        534
       ],
       "depends_on": {
         "scheduled": [],
@@ -170,8 +170,8 @@
       "foundational": false,
       "layer": 0,
       "waves": [
-        532,
-        542
+        535,
+        545
       ],
       "depends_on": {
         "scheduled": [],
@@ -185,7 +185,7 @@
       "foundational": false,
       "layer": 0,
       "waves": [
-        533
+        536
       ],
       "depends_on": {
         "scheduled": [],
@@ -199,8 +199,8 @@
       "foundational": false,
       "layer": 0,
       "waves": [
-        534,
-        543
+        537,
+        546
       ],
       "depends_on": {
         "scheduled": [],
@@ -214,9 +214,9 @@
       "foundational": false,
       "layer": 0,
       "waves": [
-        535,
-        544,
-        548
+        538,
+        547,
+        551
       ],
       "depends_on": {
         "scheduled": [],
@@ -230,7 +230,7 @@
       "foundational": true,
       "layer": 0,
       "waves": [
-        536
+        539
       ],
       "depends_on": {
         "scheduled": [],
@@ -244,8 +244,8 @@
       "foundational": false,
       "layer": 0,
       "waves": [
-        537,
-        545
+        540,
+        548
       ],
       "depends_on": {
         "scheduled": [],
@@ -259,11 +259,11 @@
       "foundational": false,
       "layer": 1,
       "waves": [
-        550,
-        561,
-        578,
-        580,
-        582
+        553,
+        564,
+        581,
+        583,
+        585
       ],
       "depends_on": {
         "scheduled": [
@@ -292,7 +292,7 @@
       "foundational": false,
       "layer": 1,
       "waves": [
-        551
+        554
       ],
       "depends_on": {
         "scheduled": [
@@ -314,8 +314,8 @@
       "foundational": false,
       "layer": 1,
       "waves": [
-        552,
-        562
+        555,
+        565
       ],
       "depends_on": {
         "scheduled": [
@@ -337,11 +337,11 @@
       "foundational": false,
       "layer": 1,
       "waves": [
-        546,
-        553,
-        564,
-        579,
-        581
+        549,
+        556,
+        567,
+        582,
+        584
       ],
       "depends_on": {
         "scheduled": [
@@ -391,8 +391,8 @@
       "foundational": false,
       "layer": 1,
       "waves": [
-        554,
-        565
+        557,
+        568
       ],
       "depends_on": {
         "scheduled": [
@@ -414,8 +414,8 @@
       "foundational": false,
       "layer": 1,
       "waves": [
-        556,
-        566
+        559,
+        569
       ],
       "depends_on": {
         "scheduled": [
@@ -458,8 +458,8 @@
       "foundational": false,
       "layer": 1,
       "waves": [
-        557,
-        567
+        560,
+        570
       ],
       "depends_on": {
         "scheduled": [
@@ -481,8 +481,8 @@
       "foundational": false,
       "layer": 1,
       "waves": [
-        558,
-        576
+        561,
+        579
       ],
       "depends_on": {
         "scheduled": [
@@ -749,8 +749,8 @@
       "foundational": false,
       "layer": 1,
       "waves": [
-        559,
-        577
+        562,
+        580
       ],
       "depends_on": {
         "scheduled": [
@@ -772,7 +772,7 @@
       "foundational": true,
       "layer": 1,
       "waves": [
-        560
+        563
       ],
       "depends_on": {
         "scheduled": [
@@ -794,8 +794,8 @@
       "foundational": false,
       "layer": 2,
       "waves": [
-        583,
-        599
+        586,
+        602
       ],
       "depends_on": {
         "scheduled": [
@@ -824,7 +824,7 @@
       "foundational": false,
       "layer": 2,
       "waves": [
-        584
+        587
       ],
       "depends_on": {
         "scheduled": [
@@ -846,12 +846,12 @@
       "foundational": false,
       "layer": 2,
       "waves": [
-        568,
-        585,
-        601,
-        613,
-        614,
-        615
+        571,
+        588,
+        604,
+        616,
+        617,
+        618
       ],
       "depends_on": {
         "scheduled": [
@@ -901,8 +901,8 @@
       "foundational": false,
       "layer": 2,
       "waves": [
-        586,
-        602
+        589,
+        605
       ],
       "depends_on": {
         "scheduled": [
@@ -924,8 +924,8 @@
       "foundational": false,
       "layer": 2,
       "waves": [
-        587,
-        603
+        590,
+        606
       ],
       "depends_on": {
         "scheduled": [
@@ -954,7 +954,7 @@
       "foundational": false,
       "layer": 2,
       "waves": [
-        588
+        591
       ],
       "depends_on": {
         "scheduled": [
@@ -976,7 +976,7 @@
       "foundational": false,
       "layer": 2,
       "waves": [
-        589
+        592
       ],
       "depends_on": {
         "scheduled": [
@@ -998,8 +998,8 @@
       "foundational": false,
       "layer": 2,
       "waves": [
-        590,
-        605
+        593,
+        608
       ],
       "depends_on": {
         "scheduled": [
@@ -1089,7 +1089,7 @@
       "foundational": false,
       "layer": 2,
       "waves": [
-        591
+        594
       ],
       "depends_on": {
         "scheduled": [
@@ -1118,7 +1118,7 @@
       "foundational": false,
       "layer": 2,
       "waves": [
-        592
+        595
       ],
       "depends_on": {
         "scheduled": [
@@ -1140,9 +1140,9 @@
       "foundational": false,
       "layer": 2,
       "waves": [
-        569,
-        593,
-        606
+        572,
+        596,
+        609
       ],
       "depends_on": {
         "scheduled": [
@@ -1199,8 +1199,8 @@
       "foundational": false,
       "layer": 2,
       "waves": [
-        594,
-        607
+        597,
+        610
       ],
       "depends_on": {
         "scheduled": [
@@ -1222,8 +1222,8 @@
       "foundational": false,
       "layer": 2,
       "waves": [
-        595,
-        608
+        598,
+        611
       ],
       "depends_on": {
         "scheduled": [
@@ -1245,8 +1245,8 @@
       "foundational": false,
       "layer": 2,
       "waves": [
-        596,
-        609
+        599,
+        612
       ],
       "depends_on": {
         "scheduled": [
@@ -1275,8 +1275,8 @@
       "foundational": false,
       "layer": 2,
       "waves": [
-        597,
-        611
+        600,
+        614
       ],
       "depends_on": {
         "scheduled": [
@@ -1326,8 +1326,8 @@
       "foundational": false,
       "layer": 2,
       "waves": [
-        598,
-        612
+        601,
+        615
       ],
       "depends_on": {
         "scheduled": [
@@ -1349,8 +1349,8 @@
       "foundational": false,
       "layer": 3,
       "waves": [
-        616,
-        629
+        619,
+        632
       ],
       "depends_on": {
         "scheduled": [
@@ -1386,9 +1386,9 @@
       "foundational": false,
       "layer": 3,
       "waves": [
-        604,
-        617,
-        630
+        607,
+        620,
+        633
       ],
       "depends_on": {
         "scheduled": [
@@ -1438,9 +1438,9 @@
       "foundational": false,
       "layer": 3,
       "waves": [
-        563,
-        618,
-        631
+        566,
+        621,
+        634
       ],
       "depends_on": {
         "scheduled": [
@@ -1476,8 +1476,8 @@
       "foundational": false,
       "layer": 3,
       "waves": [
-        619,
-        632
+        622,
+        635
       ],
       "depends_on": {
         "scheduled": [
@@ -1499,8 +1499,8 @@
       "foundational": false,
       "layer": 3,
       "waves": [
-        620,
-        633
+        623,
+        636
       ],
       "depends_on": {
         "scheduled": [
@@ -1536,7 +1536,7 @@
       "foundational": false,
       "layer": 3,
       "waves": [
-        621
+        624
       ],
       "depends_on": {
         "scheduled": [
@@ -1572,8 +1572,8 @@
       "foundational": false,
       "layer": 3,
       "waves": [
-        622,
-        634
+        625,
+        637
       ],
       "depends_on": {
         "scheduled": [
@@ -1602,8 +1602,8 @@
       "foundational": false,
       "layer": 3,
       "waves": [
-        623,
-        635
+        626,
+        638
       ],
       "depends_on": {
         "scheduled": [
@@ -1653,8 +1653,8 @@
       "foundational": false,
       "layer": 3,
       "waves": [
-        624,
-        636
+        627,
+        639
       ],
       "depends_on": {
         "scheduled": [
@@ -1690,10 +1690,10 @@
       "foundational": false,
       "layer": 3,
       "waves": [
-        570,
-        626,
-        637,
-        640
+        573,
+        629,
+        640,
+        643
       ],
       "depends_on": {
         "scheduled": [
@@ -1801,8 +1801,8 @@
       "foundational": false,
       "layer": 3,
       "waves": [
-        627,
-        638
+        630,
+        641
       ],
       "depends_on": {
         "scheduled": [
@@ -1852,9 +1852,9 @@
       "foundational": false,
       "layer": 3,
       "waves": [
-        628,
-        639,
-        641
+        631,
+        642,
+        644
       ],
       "depends_on": {
         "scheduled": [
@@ -1890,8 +1890,8 @@
       "foundational": false,
       "layer": 4,
       "waves": [
-        571,
-        651
+        574,
+        654
       ],
       "depends_on": {
         "scheduled": [
@@ -1927,11 +1927,11 @@
       "foundational": false,
       "layer": 4,
       "waves": [
-        572,
-        642,
-        652,
-        660,
-        666
+        575,
+        645,
+        655,
+        663,
+        669
       ],
       "depends_on": {
         "scheduled": [
@@ -1995,10 +1995,10 @@
       "foundational": false,
       "layer": 4,
       "waves": [
-        573,
-        643,
-        653,
-        661
+        576,
+        646,
+        656,
+        664
       ],
       "depends_on": {
         "scheduled": [
@@ -2048,7 +2048,7 @@
       "foundational": false,
       "layer": 4,
       "waves": [
-        644
+        647
       ],
       "depends_on": {
         "scheduled": [
@@ -2091,7 +2091,7 @@
       "foundational": false,
       "layer": 4,
       "waves": [
-        645
+        648
       ],
       "depends_on": {
         "scheduled": [
@@ -2127,11 +2127,11 @@
       "foundational": false,
       "layer": 4,
       "waves": [
-        574,
-        625,
-        654,
-        662,
-        667
+        577,
+        628,
+        657,
+        665,
+        670
       ],
       "depends_on": {
         "scheduled": [
@@ -2181,11 +2181,11 @@
       "foundational": false,
       "layer": 4,
       "waves": [
-        646,
-        655,
-        665,
+        649,
+        658,
         668,
-        669
+        671,
+        672
       ],
       "depends_on": {
         "scheduled": [
@@ -2361,8 +2361,8 @@
       "foundational": false,
       "layer": 4,
       "waves": [
-        647,
-        656
+        650,
+        659
       ],
       "depends_on": {
         "scheduled": [
@@ -2398,8 +2398,8 @@
       "foundational": false,
       "layer": 4,
       "waves": [
-        648,
-        657
+        651,
+        660
       ],
       "depends_on": {
         "scheduled": [
@@ -2442,8 +2442,8 @@
       "foundational": false,
       "layer": 4,
       "waves": [
-        600,
-        658
+        603,
+        661
       ],
       "depends_on": {
         "scheduled": [
@@ -2486,9 +2486,9 @@
       "foundational": false,
       "layer": 4,
       "waves": [
-        575,
-        650,
-        659
+        578,
+        653,
+        662
       ],
       "depends_on": {
         "scheduled": [
@@ -2552,9 +2552,9 @@
       "foundational": false,
       "layer": 5,
       "waves": [
-        670,
-        683,
-        690
+        673,
+        686,
+        693
       ],
       "depends_on": {
         "scheduled": [
@@ -2597,8 +2597,8 @@
       "foundational": false,
       "layer": 5,
       "waves": [
-        671,
-        684
+        674,
+        687
       ],
       "depends_on": {
         "scheduled": [
@@ -2648,10 +2648,10 @@
       "foundational": false,
       "layer": 5,
       "waves": [
-        649,
-        672,
-        685,
-        692
+        652,
+        675,
+        688,
+        695
       ],
       "depends_on": {
         "scheduled": [
@@ -2708,7 +2708,7 @@
       "foundational": false,
       "layer": 5,
       "waves": [
-        673
+        676
       ],
       "depends_on": {
         "scheduled": [
@@ -2751,8 +2751,8 @@
       "foundational": false,
       "layer": 5,
       "waves": [
-        674,
-        686
+        677,
+        689
       ],
       "depends_on": {
         "scheduled": [
@@ -2802,7 +2802,7 @@
       "foundational": false,
       "layer": 5,
       "waves": [
-        675
+        678
       ],
       "depends_on": {
         "scheduled": [
@@ -2824,8 +2824,8 @@
       "foundational": false,
       "layer": 5,
       "waves": [
-        676,
-        687
+        679,
+        690
       ],
       "depends_on": {
         "scheduled": [
@@ -2882,7 +2882,7 @@
       "foundational": false,
       "layer": 5,
       "waves": [
-        677
+        680
       ],
       "depends_on": {
         "scheduled": [
@@ -2939,9 +2939,9 @@
       "foundational": false,
       "layer": 5,
       "waves": [
-        610,
-        678,
-        688
+        613,
+        681,
+        691
       ],
       "depends_on": {
         "scheduled": [
@@ -2991,8 +2991,8 @@
       "foundational": false,
       "layer": 5,
       "waves": [
-        663,
-        679
+        666,
+        682
       ],
       "depends_on": {
         "scheduled": [
@@ -3014,7 +3014,7 @@
       "foundational": false,
       "layer": 5,
       "waves": [
-        680
+        683
       ],
       "depends_on": {
         "scheduled": [
@@ -3043,7 +3043,7 @@
       "foundational": false,
       "layer": 5,
       "waves": [
-        681
+        684
       ],
       "depends_on": {
         "scheduled": [
@@ -3072,11 +3072,11 @@
       "foundational": false,
       "layer": 5,
       "waves": [
-        664,
-        682,
-        689,
-        691,
-        693
+        667,
+        685,
+        692,
+        694,
+        696
       ],
       "depends_on": {
         "scheduled": [
@@ -3147,9 +3147,9 @@
       "foundational": false,
       "layer": 6,
       "waves": [
-        694,
-        704,
-        710
+        697,
+        707,
+        713
       ],
       "depends_on": {
         "scheduled": [
@@ -3185,8 +3185,8 @@
       "foundational": false,
       "layer": 6,
       "waves": [
-        695,
-        706
+        698,
+        709
       ],
       "depends_on": {
         "scheduled": [
@@ -3299,7 +3299,7 @@
       "foundational": false,
       "layer": 6,
       "waves": [
-        696
+        699
       ],
       "depends_on": {
         "scheduled": [
@@ -3349,9 +3349,9 @@
       "foundational": false,
       "layer": 6,
       "waves": [
-        697,
-        707,
-        711
+        700,
+        710,
+        714
       ],
       "depends_on": {
         "scheduled": [
@@ -3401,9 +3401,9 @@
       "foundational": false,
       "layer": 6,
       "waves": [
-        698,
-        708,
-        712
+        701,
+        711,
+        715
       ],
       "depends_on": {
         "scheduled": [
@@ -3453,7 +3453,7 @@
       "foundational": false,
       "layer": 6,
       "waves": [
-        699
+        702
       ],
       "depends_on": {
         "scheduled": [
@@ -3475,7 +3475,7 @@
       "foundational": false,
       "layer": 6,
       "waves": [
-        700
+        703
       ],
       "depends_on": {
         "scheduled": [
@@ -3497,7 +3497,7 @@
       "foundational": false,
       "layer": 6,
       "waves": [
-        701
+        704
       ],
       "depends_on": {
         "scheduled": [
@@ -3526,9 +3526,9 @@
       "foundational": false,
       "layer": 6,
       "waves": [
-        555,
-        702,
-        709
+        558,
+        705,
+        712
       ],
       "depends_on": {
         "scheduled": [
@@ -3564,7 +3564,7 @@
       "foundational": false,
       "layer": 6,
       "waves": [
-        703
+        706
       ],
       "depends_on": {
         "scheduled": [
@@ -3600,8 +3600,8 @@
       "foundational": false,
       "layer": 7,
       "waves": [
-        713,
-        721
+        716,
+        724
       ],
       "depends_on": {
         "scheduled": [
@@ -3651,9 +3651,9 @@
       "foundational": false,
       "layer": 7,
       "waves": [
-        705,
-        714,
-        722
+        708,
+        717,
+        725
       ],
       "depends_on": {
         "scheduled": [
@@ -3689,7 +3689,7 @@
       "foundational": false,
       "layer": 7,
       "waves": [
-        715
+        718
       ],
       "depends_on": {
         "scheduled": [
@@ -3725,8 +3725,8 @@
       "foundational": false,
       "layer": 7,
       "waves": [
-        716,
-        723
+        719,
+        726
       ],
       "depends_on": {
         "scheduled": [
@@ -3804,8 +3804,8 @@
       "foundational": false,
       "layer": 7,
       "waves": [
-        717,
-        724
+        720,
+        727
       ],
       "depends_on": {
         "scheduled": [
@@ -3855,8 +3855,8 @@
       "foundational": false,
       "layer": 7,
       "waves": [
-        718,
-        725
+        721,
+        728
       ],
       "depends_on": {
         "scheduled": [
@@ -3885,7 +3885,7 @@
       "foundational": false,
       "layer": 7,
       "waves": [
-        719
+        722
       ],
       "depends_on": {
         "scheduled": [
@@ -3907,7 +3907,7 @@
       "foundational": false,
       "layer": 7,
       "waves": [
-        720
+        723
       ],
       "depends_on": {
         "scheduled": [
@@ -3929,8 +3929,8 @@
       "foundational": false,
       "layer": 8,
       "waves": [
-        726,
-        727
+        729,
+        730
       ],
       "depends_on": {
         "scheduled": [
@@ -3949,13 +3949,13 @@
   ],
   "waves": [
     {
-      "index": 524,
+      "index": 527,
       "link_unit": "libgit2",
       "module": "src/libgit2/buf.c",
       "foundational": false,
       "layer": 0,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [],
         "cut": []
@@ -3973,7 +3973,7 @@
           "module": "src/libgit2/buf.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_buf",
@@ -3987,12 +3987,14 @@
               "home": "src/libgit2/src/libgit2/buf.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "2cfff8582701dab369da7b00177fbc5b98dfac28"
+          ]
         }
       ]
     },
     {
-      "index": 525,
+      "index": 528,
       "link_unit": "libgit2",
       "module": "src/libgit2/hashsig.c",
       "foundational": false,
@@ -4031,13 +4033,13 @@
       ]
     },
     {
-      "index": 526,
+      "index": 529,
       "link_unit": "libgit2",
       "module": "src/libgit2/indexer.c",
       "foundational": false,
       "layer": 0,
       "sublayer": 0,
-      "status": "todo",
+      "status": "wip",
       "depends_on": {
         "scheduled": [],
         "cut": []
@@ -4073,7 +4075,7 @@
           "module": "src/libgit2/indexer.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_indexer_progress",
@@ -4091,18 +4093,20 @@
               "home": "src/libgit2/src/libgit2/indexer.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "9f243dd2ec60c1ef2ad88343d56f1efae544b57c"
+          ]
         }
       ]
     },
     {
-      "index": 527,
+      "index": 530,
       "link_unit": "libgit2",
       "module": "src/libgit2/iterator.c",
       "foundational": false,
       "layer": 0,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [],
         "cut": []
@@ -4120,7 +4124,7 @@
           "module": "src/libgit2/iterator.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_iterator",
@@ -4130,18 +4134,20 @@
               "home": "src/libgit2/src/libgit2/iterator.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "a778521e9979112f371316d003f5a0e2378d1c2a"
+          ]
         }
       ]
     },
     {
-      "index": 528,
+      "index": 531,
       "link_unit": "libgit2",
       "module": "src/libgit2/libgit2.c",
       "foundational": false,
       "layer": 0,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [],
         "cut": []
@@ -4159,7 +4165,7 @@
           "module": "src/libgit2/libgit2.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_libgit2_feature_backend",
@@ -4204,18 +4210,21 @@
               "home": "src/libgit2/src/libgit2/libgit2.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "dac180222d13eee4ccf815f5518384f011e11cd1",
+            "54821dd07352bd8cd3878f4dca51a1ebb5bdb816"
+          ]
         }
       ]
     },
     {
-      "index": 529,
+      "index": 532,
       "link_unit": "libgit2",
       "module": "src/libgit2/oid.c",
       "foundational": false,
       "layer": 0,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [],
         "cut": []
@@ -4233,7 +4242,7 @@
           "module": "src/libgit2/oid.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_oid",
@@ -4253,18 +4262,20 @@
               "home": "src/libgit2/src/libgit2/oid.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "d2b626458dd4eec8ee471e7217ac7fff44607fee"
+          ]
         }
       ]
     },
     {
-      "index": 530,
+      "index": 533,
       "link_unit": "libgit2",
       "module": "src/libgit2/path.c",
       "foundational": false,
       "layer": 0,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [],
         "cut": []
@@ -4282,7 +4293,7 @@
           "module": "src/libgit2/path.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_path_is_gitfile",
@@ -4292,18 +4303,20 @@
               "home": "src/libgit2/src/libgit2/path.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "8eb44bc1dd52373762bfaf73770c89282b22480c"
+          ]
         }
       ]
     },
     {
-      "index": 531,
+      "index": 534,
       "link_unit": "libgit2",
       "module": "src/libgit2/settings.c",
       "foundational": false,
       "layer": 0,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [],
         "cut": []
@@ -4321,7 +4334,7 @@
           "module": "src/libgit2/settings.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_libgit2_buildinfo",
@@ -4338,18 +4351,21 @@
               "home": "src/libgit2/src/libgit2/settings.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "dac180222d13eee4ccf815f5518384f011e11cd1",
+            "54821dd07352bd8cd3878f4dca51a1ebb5bdb816"
+          ]
         }
       ]
     },
     {
-      "index": 532,
+      "index": 535,
       "link_unit": "libgit2",
       "module": "src/libgit2/strarray.c",
       "foundational": false,
       "layer": 0,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [],
         "cut": []
@@ -4367,7 +4383,7 @@
           "module": "src/libgit2/strarray.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_strarray",
@@ -4380,18 +4396,20 @@
               "home": "src/libgit2/src/libgit2/strarray.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "359d419fa4b16365e552831a4b6d99ecadfc7db6"
+          ]
         }
       ]
     },
     {
-      "index": 533,
+      "index": 536,
       "link_unit": "libgit2",
       "module": "src/libgit2/trace.c",
       "foundational": false,
       "layer": 0,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [],
         "cut": []
@@ -4409,7 +4427,7 @@
           "module": "src/libgit2/trace.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_trace_cb",
@@ -4426,18 +4444,21 @@
               "home": "src/libgit2/src/libgit2/trace.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "54821dd07352bd8cd3878f4dca51a1ebb5bdb816",
+            "69f762fb0aaee2e6969c552cf8b879c1e0743718"
+          ]
         }
       ]
     },
     {
-      "index": 534,
+      "index": 537,
       "link_unit": "libgit2",
       "module": "src/libgit2/trailer.c",
       "foundational": false,
       "layer": 0,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [],
         "cut": []
@@ -4455,7 +4476,7 @@
           "module": "src/libgit2/trailer.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_message_trailer",
@@ -4479,12 +4500,15 @@
               "home": "src/libgit2/src/libgit2/trailer.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "09ed5d252e6e4ea129065f952bf5f63612c82e74",
+            "6e89221dac47d4254095770a2b3fdff99170e63d"
+          ]
         }
       ]
     },
     {
-      "index": 535,
+      "index": 538,
       "link_unit": "libgit2",
       "module": "src/libgit2/transports/credential.c",
       "foundational": false,
@@ -4558,13 +4582,13 @@
       ]
     },
     {
-      "index": 536,
+      "index": 539,
       "link_unit": "libgit2",
       "module": "src/util/alloc.c",
       "foundational": true,
       "layer": 0,
       "sublayer": 0,
-      "status": "todo",
+      "status": "wip",
       "depends_on": {
         "scheduled": [],
         "cut": []
@@ -4582,7 +4606,7 @@
           "module": "src/util/alloc.c",
           "foundational": true,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_allocator",
@@ -4596,7 +4620,9 @@
               "home": "src/libgit2/src/util/alloc.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "8d14c83d9c5cd95dca8054140031c2dfc910ceb9"
+          ]
         },
         {
           "index": 1,
@@ -4661,13 +4687,13 @@
       ]
     },
     {
-      "index": 537,
+      "index": 540,
       "link_unit": "libgit2",
       "module": "src/util/errors.c",
       "foundational": false,
       "layer": 0,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [],
         "cut": []
@@ -4685,7 +4711,7 @@
           "module": "src/util/errors.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_error",
@@ -4698,7 +4724,9 @@
               "home": "src/libgit2/src/util/errors.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "8d14c83d9c5cd95dca8054140031c2dfc910ceb9"
+          ]
         },
         {
           "index": 1,
@@ -4706,7 +4734,7 @@
           "module": "src/util/errors.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_error_clear",
@@ -4737,21 +4765,23 @@
               "home": "src/libgit2/src/util/errors.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "2e2163861be55a3e9b5c4013510dc965990bcdf7"
+          ]
         }
       ]
     },
     {
-      "index": 538,
+      "index": 541,
       "link_unit": "libgit2",
       "module": "src/libgit2/buf.c",
       "foundational": false,
       "layer": 0,
       "sublayer": 1,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          524
+          527
         ],
         "cut": []
       },
@@ -4768,7 +4798,7 @@
           "module": "src/libgit2/buf.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_buf_dispose",
@@ -4778,12 +4808,14 @@
               "home": "src/libgit2/src/libgit2/buf.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "54821dd07352bd8cd3878f4dca51a1ebb5bdb816"
+          ]
         }
       ]
     },
     {
-      "index": 539,
+      "index": 542,
       "link_unit": "libgit2",
       "module": "src/libgit2/hashsig.c",
       "foundational": false,
@@ -4792,7 +4824,7 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          525
+          528
         ],
         "cut": []
       },
@@ -4845,16 +4877,16 @@
       ]
     },
     {
-      "index": 540,
+      "index": 543,
       "link_unit": "libgit2",
       "module": "src/libgit2/indexer.c",
       "foundational": false,
       "layer": 0,
       "sublayer": 1,
-      "status": "todo",
+      "status": "wip",
       "depends_on": {
         "scheduled": [
-          526
+          529
         ],
         "cut": []
       },
@@ -4867,6 +4899,26 @@
       "batches": [
         {
           "index": 0,
+          "link_unit": "libgit2",
+          "module": "src/libgit2/indexer.c",
+          "foundational": false,
+          "kind": "wrap",
+          "status": "done",
+          "items": [
+            {
+              "name": "git_indexer_progress_cb",
+              "defined_in": "include/git2/indexer.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/indexer.rs"
+            }
+          ],
+          "commits": [
+            "4b00f9c6773f1c8791ca35c2ba1fa488520bf022"
+          ]
+        },
+        {
+          "index": 1,
           "link_unit": "libgit2",
           "module": "src/libgit2/indexer.c",
           "foundational": false,
@@ -4900,13 +4952,6 @@
               "kind": "symbol",
               "field_anchors": [],
               "home": "src/libgit2/src/libgit2/indexer.rs"
-            },
-            {
-              "name": "git_indexer_progress_cb",
-              "defined_in": "include/git2/indexer.h",
-              "kind": "callback",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/indexer.rs"
             }
           ],
           "commits": []
@@ -4914,16 +4959,16 @@
       ]
     },
     {
-      "index": 541,
+      "index": 544,
       "link_unit": "libgit2",
       "module": "src/libgit2/oid.c",
       "foundational": false,
       "layer": 0,
       "sublayer": 1,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          529
+          532
         ],
         "cut": []
       },
@@ -4940,7 +4985,7 @@
           "module": "src/libgit2/oid.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_oid_cmp",
@@ -5069,21 +5114,23 @@
               "home": "src/libgit2/src/libgit2/oid.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "f24fc53f580b4c709ceaec1f6e84c5a53451eb82"
+          ]
         }
       ]
     },
     {
-      "index": 542,
+      "index": 545,
       "link_unit": "libgit2",
       "module": "src/libgit2/strarray.c",
       "foundational": false,
       "layer": 0,
       "sublayer": 1,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          532
+          535
         ],
         "cut": []
       },
@@ -5100,7 +5147,7 @@
           "module": "src/libgit2/strarray.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_strarray_dispose",
@@ -5110,21 +5157,23 @@
               "home": "src/libgit2/src/libgit2/strarray.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "54821dd07352bd8cd3878f4dca51a1ebb5bdb816"
+          ]
         }
       ]
     },
     {
-      "index": 543,
+      "index": 546,
       "link_unit": "libgit2",
       "module": "src/libgit2/trailer.c",
       "foundational": false,
       "layer": 0,
       "sublayer": 1,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          534
+          537
         ],
         "cut": []
       },
@@ -5141,7 +5190,7 @@
           "module": "src/libgit2/trailer.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_message_trailer_array_free",
@@ -5158,12 +5207,14 @@
               "home": "src/libgit2/src/libgit2/trailer.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "f98dbf383092b22fa405e3a55798e5ba0e138625"
+          ]
         }
       ]
     },
     {
-      "index": 544,
+      "index": 547,
       "link_unit": "libgit2",
       "module": "src/libgit2/transports/credential.c",
       "foundational": false,
@@ -5172,7 +5223,7 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          535
+          538
         ],
         "cut": []
       },
@@ -5337,16 +5388,16 @@
       ]
     },
     {
-      "index": 545,
+      "index": 548,
       "link_unit": "libgit2",
       "module": "src/util/errors.c",
       "foundational": false,
       "layer": 0,
       "sublayer": 1,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          537
+          540
         ],
         "cut": []
       },
@@ -5363,7 +5414,7 @@
           "module": "src/util/errors.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_error_last",
@@ -5373,18 +5424,20 @@
               "home": "src/libgit2/src/util/errors.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "809c42af653d7c86997aec570d7c019003d21920"
+          ]
         }
       ]
     },
     {
-      "index": 546,
+      "index": 549,
       "link_unit": "libgit2",
       "module": "src/libgit2/odb.c",
       "foundational": false,
       "layer": 1,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [],
         "cut": []
@@ -5402,7 +5455,7 @@
           "module": "src/libgit2/odb.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_odb",
@@ -5412,12 +5465,14 @@
               "home": "src/libgit2/src/libgit2/odb.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "a18b80d55731dd737ff6330789587ebd5cc6a084"
+          ]
         }
       ]
     },
     {
-      "index": 547,
+      "index": 550,
       "link_unit": "libgit2",
       "module": "src/libgit2/indexer.c",
       "foundational": false,
@@ -5426,8 +5481,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          540,
-          546
+          543,
+          549
         ],
         "cut": []
       },
@@ -5467,7 +5522,7 @@
       ]
     },
     {
-      "index": 548,
+      "index": 551,
       "link_unit": "libgit2",
       "module": "src/libgit2/transports/credential.c",
       "foundational": false,
@@ -5476,8 +5531,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          535,
-          544
+          538,
+          547
         ],
         "cut": []
       },
@@ -5553,7 +5608,7 @@
       ]
     },
     {
-      "index": 549,
+      "index": 552,
       "link_unit": "libgit2",
       "module": "src/libgit2/indexer.c",
       "foundational": false,
@@ -5562,8 +5617,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          526,
-          547
+          529,
+          550
         ],
         "cut": []
       },
@@ -5602,16 +5657,16 @@
       ]
     },
     {
-      "index": 550,
+      "index": 553,
       "link_unit": "libgit2",
       "module": "src/libgit2/diff.c",
       "foundational": false,
       "layer": 1,
       "sublayer": 0,
-      "status": "todo",
+      "status": "wip",
       "depends_on": {
         "scheduled": [
-          529
+          532
         ],
         "cut": []
       },
@@ -5628,7 +5683,7 @@
           "module": "src/libgit2/diff.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_diff",
@@ -5636,21 +5691,11 @@
               "kind": "type",
               "field_anchors": [],
               "home": "src/libgit2/src/libgit2/diff.rs"
-            },
-            {
-              "name": "git_diff_binary_file",
-              "defined_in": "include/git2/diff.h",
-              "kind": "type",
-              "field_anchors": [
-                "type",
-                "data",
-                "datalen",
-                "inflatedlen"
-              ],
-              "home": "src/libgit2/src/libgit2/diff.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "8f238f339b2f009cef8cce12228fc34418ce0322"
+          ]
         },
         {
           "index": 1,
@@ -5747,20 +5792,43 @@
             }
           ],
           "commits": []
+        },
+        {
+          "index": 4,
+          "link_unit": "libgit2",
+          "module": "src/libgit2/diff.c",
+          "foundational": false,
+          "kind": "wrap",
+          "status": "todo",
+          "items": [
+            {
+              "name": "git_diff_binary_file",
+              "defined_in": "include/git2/diff.h",
+              "kind": "type",
+              "field_anchors": [
+                "type",
+                "data",
+                "datalen",
+                "inflatedlen"
+              ],
+              "home": "src/libgit2/src/libgit2/diff.rs"
+            }
+          ],
+          "commits": []
         }
       ]
     },
     {
-      "index": 551,
+      "index": 554,
       "link_unit": "libgit2",
       "module": "src/libgit2/message.c",
       "foundational": false,
       "layer": 1,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          524
+          527
         ],
         "cut": []
       },
@@ -5777,7 +5845,7 @@
           "module": "src/libgit2/message.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_message_prettify",
@@ -5787,12 +5855,14 @@
               "home": "src/libgit2/src/libgit2/message.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "fc73df8654805c0b637d2f1d3e1f5725e70fb342"
+          ]
         }
       ]
     },
     {
-      "index": 552,
+      "index": 555,
       "link_unit": "libgit2",
       "module": "src/libgit2/midx.c",
       "foundational": false,
@@ -5841,17 +5911,17 @@
       ]
     },
     {
-      "index": 553,
+      "index": 556,
       "link_unit": "libgit2",
       "module": "src/libgit2/odb.c",
       "foundational": false,
       "layer": 1,
       "sublayer": 1,
-      "status": "todo",
+      "status": "wip",
       "depends_on": {
         "scheduled": [
-          529,
-          546
+          532,
+          549
         ],
         "cut": []
       },
@@ -5868,7 +5938,7 @@
           "module": "src/libgit2/odb.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_odb_expand_id",
@@ -5882,10 +5952,55 @@
               "home": "src/libgit2/src/libgit2/odb.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "603bf0085542a88fba6379f21a64073266f6df5c"
+          ]
         },
         {
           "index": 1,
+          "link_unit": "libgit2",
+          "module": "src/libgit2/odb.c",
+          "foundational": false,
+          "kind": "wrap",
+          "status": "done",
+          "items": [
+            {
+              "name": "git_odb_options",
+              "defined_in": "include/git2/odb.h",
+              "kind": "type",
+              "field_anchors": [
+                "version",
+                "oid_type"
+              ],
+              "home": "src/libgit2/src/libgit2/odb.rs"
+            }
+          ],
+          "commits": [
+            "603bf0085542a88fba6379f21a64073266f6df5c"
+          ]
+        },
+        {
+          "index": 2,
+          "link_unit": "libgit2",
+          "module": "src/libgit2/odb.c",
+          "foundational": false,
+          "kind": "wrap",
+          "status": "done",
+          "items": [
+            {
+              "name": "git_odb_foreach_cb",
+              "defined_in": "include/git2/odb.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/odb.rs"
+            }
+          ],
+          "commits": [
+            "b043039e2016c76238d9ced0e5400571fd20aee0"
+          ]
+        },
+        {
+          "index": 3,
           "link_unit": "libgit2",
           "module": "src/libgit2/odb.c",
           "foundational": false,
@@ -5898,34 +6013,6 @@
               "kind": "type",
               "field_anchors": [],
               "home": "src/libgit2/src/libgit2/odb.rs"
-            },
-            {
-              "name": "git_odb_options",
-              "defined_in": "include/git2/odb.h",
-              "kind": "type",
-              "field_anchors": [
-                "version",
-                "oid_type"
-              ],
-              "home": "src/libgit2/src/libgit2/odb.rs"
-            }
-          ],
-          "commits": []
-        },
-        {
-          "index": 2,
-          "link_unit": "libgit2",
-          "module": "src/libgit2/odb.c",
-          "foundational": false,
-          "kind": "wrap",
-          "status": "todo",
-          "items": [
-            {
-              "name": "git_odb_foreach_cb",
-              "defined_in": "include/git2/odb.h",
-              "kind": "callback",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/odb.rs"
             }
           ],
           "commits": []
@@ -5933,16 +6020,16 @@
       ]
     },
     {
-      "index": 554,
+      "index": 557,
       "link_unit": "libgit2",
       "module": "src/libgit2/oidarray.c",
       "foundational": false,
       "layer": 1,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          529
+          532
         ],
         "cut": []
       },
@@ -5959,7 +6046,7 @@
           "module": "src/libgit2/oidarray.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_oidarray",
@@ -5972,12 +6059,14 @@
               "home": "src/libgit2/src/libgit2/oidarray.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "29cf58358f5629158674dd24759b4b18d430de29"
+          ]
         }
       ]
     },
     {
-      "index": 555,
+      "index": 558,
       "link_unit": "libgit2",
       "module": "src/libgit2/transports/smart.c",
       "foundational": false,
@@ -6036,7 +6125,7 @@
       ]
     },
     {
-      "index": 556,
+      "index": 559,
       "link_unit": "libgit2",
       "module": "src/libgit2/proxy.c",
       "foundational": false,
@@ -6045,8 +6134,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          544,
-          555
+          547,
+          558
         ],
         "cut": []
       },
@@ -6085,7 +6174,7 @@
       ]
     },
     {
-      "index": 557,
+      "index": 560,
       "link_unit": "libgit2",
       "module": "src/libgit2/refspec.c",
       "foundational": false,
@@ -6124,17 +6213,17 @@
       ]
     },
     {
-      "index": 558,
+      "index": 561,
       "link_unit": "libgit2",
       "module": "src/libgit2/repository.c",
       "foundational": false,
       "layer": 1,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          524,
-          529
+          527,
+          532
         ],
         "cut": []
       },
@@ -6151,7 +6240,7 @@
           "module": "src/libgit2/repository.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_repository",
@@ -6161,7 +6250,9 @@
               "home": "src/libgit2/src/libgit2/repository.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "cbe6fcd450111f56b1f329cc3d9731c60be581a7"
+          ]
         },
         {
           "index": 1,
@@ -6169,7 +6260,7 @@
           "module": "src/libgit2/repository.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_repository_init_options",
@@ -6200,7 +6291,9 @@
               "home": "src/libgit2/src/libgit2/repository.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "9d9785ed358a442335f3ecc9614ff8fba3a07c65"
+          ]
         },
         {
           "index": 2,
@@ -6208,7 +6301,7 @@
           "module": "src/libgit2/repository.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_repository_discover",
@@ -6232,12 +6325,15 @@
               "home": "src/libgit2/src/libgit2/repository.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "2a6ef804903d3d2c84f76d19cfe6912eac0e1e82",
+            "8eb44bc1dd52373762bfaf73770c89282b22480c"
+          ]
         }
       ]
     },
     {
-      "index": 559,
+      "index": 562,
       "link_unit": "libgit2",
       "module": "src/libgit2/transports/credential_helpers.c",
       "foundational": false,
@@ -6279,7 +6375,7 @@
       ]
     },
     {
-      "index": 560,
+      "index": 563,
       "link_unit": "libgit2",
       "module": "src/util/allocators/stdalloc.c",
       "foundational": true,
@@ -6288,7 +6384,7 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          536
+          539
         ],
         "cut": []
       },
@@ -6320,17 +6416,17 @@
       ]
     },
     {
-      "index": 561,
+      "index": 564,
       "link_unit": "libgit2",
       "module": "src/libgit2/diff.c",
       "foundational": false,
       "layer": 1,
       "sublayer": 1,
-      "status": "todo",
+      "status": "wip",
       "depends_on": {
         "scheduled": [
-          529,
-          550
+          532,
+          553
         ],
         "cut": []
       },
@@ -6347,19 +6443,8 @@
           "module": "src/libgit2/diff.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
-            {
-              "name": "git_diff_binary",
-              "defined_in": "include/git2/diff.h",
-              "kind": "type",
-              "field_anchors": [
-                "new_file",
-                "old_file",
-                "contains_data"
-              ],
-              "home": "src/libgit2/src/libgit2/diff.rs"
-            },
             {
               "name": "git_diff_delta",
               "defined_in": "include/git2/diff.h",
@@ -6375,7 +6460,9 @@
               "home": "src/libgit2/src/libgit2/diff.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "8f238f339b2f009cef8cce12228fc34418ce0322"
+          ]
         },
         {
           "index": 1,
@@ -6467,11 +6554,33 @@
             }
           ],
           "commits": []
+        },
+        {
+          "index": 3,
+          "link_unit": "libgit2",
+          "module": "src/libgit2/diff.c",
+          "foundational": false,
+          "kind": "wrap",
+          "status": "todo",
+          "items": [
+            {
+              "name": "git_diff_binary",
+              "defined_in": "include/git2/diff.h",
+              "kind": "type",
+              "field_anchors": [
+                "new_file",
+                "old_file",
+                "contains_data"
+              ],
+              "home": "src/libgit2/src/libgit2/diff.rs"
+            }
+          ],
+          "commits": []
         }
       ]
     },
     {
-      "index": 562,
+      "index": 565,
       "link_unit": "libgit2",
       "module": "src/libgit2/midx.c",
       "foundational": false,
@@ -6480,8 +6589,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          524,
-          552
+          527,
+          555
         ],
         "cut": []
       },
@@ -6548,7 +6657,7 @@
       ]
     },
     {
-      "index": 563,
+      "index": 566,
       "link_unit": "libgit2",
       "module": "src/libgit2/commit_graph.c",
       "foundational": false,
@@ -6587,23 +6696,23 @@
       ]
     },
     {
-      "index": 564,
+      "index": 567,
       "link_unit": "libgit2",
       "module": "src/libgit2/odb.c",
       "foundational": false,
       "layer": 1,
       "sublayer": 2,
-      "status": "todo",
+      "status": "wip",
       "depends_on": {
         "scheduled": [
-          529,
-          540,
-          546,
-          553,
-          563
+          532,
+          543,
+          549,
+          556,
+          566
         ],
         "cut": [
-          579
+          582
         ]
       },
       "budgets": {
@@ -6619,7 +6728,7 @@
           "module": "src/libgit2/odb.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_odb_backend",
@@ -6646,7 +6755,9 @@
               "home": "src/libgit2/src/libgit2/odb.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "9fe83bce60830288bb2f8157a6c7962abb1927f1"
+          ]
         },
         {
           "index": 1,
@@ -6654,7 +6765,7 @@
           "module": "src/libgit2/odb.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_odb_add_disk_alternate",
@@ -6685,20 +6796,6 @@
               "home": "src/libgit2/src/libgit2/odb.rs"
             },
             {
-              "name": "git_odb_expand_ids",
-              "defined_in": "src/libgit2/odb.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/odb.rs"
-            },
-            {
-              "name": "git_odb_foreach",
-              "defined_in": "src/libgit2/odb.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/odb.rs"
-            },
-            {
               "name": "git_odb_free",
               "defined_in": "src/libgit2/odb.c",
               "kind": "symbol",
@@ -6707,13 +6804,6 @@
             },
             {
               "name": "git_odb_new",
-              "defined_in": "src/libgit2/odb.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/odb.rs"
-            },
-            {
-              "name": "git_odb_new_ext",
               "defined_in": "src/libgit2/odb.c",
               "kind": "symbol",
               "field_anchors": [],
@@ -6776,20 +6866,6 @@
               "home": "src/libgit2/src/libgit2/odb.rs"
             },
             {
-              "name": "git_odb_open_ext",
-              "defined_in": "src/libgit2/odb.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/odb.rs"
-            },
-            {
-              "name": "git_odb_options_init",
-              "defined_in": "src/libgit2/odb.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/odb.rs"
-            },
-            {
               "name": "git_odb_read",
               "defined_in": "src/libgit2/odb.c",
               "kind": "symbol",
@@ -6832,7 +6908,9 @@
               "home": "src/libgit2/src/libgit2/odb.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "b043039e2016c76238d9ced0e5400571fd20aee0"
+          ]
         },
         {
           "index": 2,
@@ -6840,10 +6918,58 @@
           "module": "src/libgit2/odb.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_odb_write_multi_pack_index",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/odb.rs"
+            }
+          ],
+          "commits": [
+            "b043039e2016c76238d9ced0e5400571fd20aee0"
+          ]
+        },
+        {
+          "index": 3,
+          "link_unit": "libgit2",
+          "module": "src/libgit2/odb.c",
+          "foundational": false,
+          "kind": "wrap",
+          "status": "todo",
+          "items": [
+            {
+              "name": "git_odb_expand_ids",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/odb.rs"
+            },
+            {
+              "name": "git_odb_foreach",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/odb.rs"
+            },
+            {
+              "name": "git_odb_new_ext",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/odb.rs"
+            },
+            {
+              "name": "git_odb_open_ext",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/odb.rs"
+            },
+            {
+              "name": "git_odb_options_init",
               "defined_in": "src/libgit2/odb.c",
               "kind": "symbol",
               "field_anchors": [],
@@ -6855,16 +6981,16 @@
       ]
     },
     {
-      "index": 565,
+      "index": 568,
       "link_unit": "libgit2",
       "module": "src/libgit2/oidarray.c",
       "foundational": false,
       "layer": 1,
       "sublayer": 1,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          554
+          557
         ],
         "cut": []
       },
@@ -6881,7 +7007,7 @@
           "module": "src/libgit2/oidarray.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_oidarray_dispose",
@@ -6891,12 +7017,14 @@
               "home": "src/libgit2/src/libgit2/oidarray.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "3c8309ccb9a7d18f69e399fc4b0b156fa3012ef7"
+          ]
         }
       ]
     },
     {
-      "index": 566,
+      "index": 569,
       "link_unit": "libgit2",
       "module": "src/libgit2/proxy.c",
       "foundational": false,
@@ -6905,7 +7033,7 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          556
+          559
         ],
         "cut": []
       },
@@ -6937,7 +7065,7 @@
       ]
     },
     {
-      "index": 567,
+      "index": 570,
       "link_unit": "libgit2",
       "module": "src/libgit2/refspec.c",
       "foundational": false,
@@ -6946,8 +7074,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          524,
-          557
+          527,
+          560
         ],
         "cut": []
       },
@@ -7056,13 +7184,13 @@
       ]
     },
     {
-      "index": 568,
+      "index": 571,
       "link_unit": "libgit2",
       "module": "src/libgit2/config.c",
       "foundational": false,
       "layer": 2,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [],
         "cut": []
@@ -7080,7 +7208,7 @@
           "module": "src/libgit2/config.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_config",
@@ -7090,18 +7218,20 @@
               "home": "src/libgit2/src/libgit2/config.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "5e49e3c75674c885a170ac2d204a43dd121a08d6"
+          ]
         }
       ]
     },
     {
-      "index": 569,
+      "index": 572,
       "link_unit": "libgit2",
       "module": "src/libgit2/object.c",
       "foundational": false,
       "layer": 2,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [],
         "cut": []
@@ -7119,7 +7249,7 @@
           "module": "src/libgit2/object.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_object",
@@ -7129,18 +7259,20 @@
               "home": "src/libgit2/src/libgit2/object.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "3caf61098fb32208293ee95b6d353691d6d70c8b"
+          ]
         }
       ]
     },
     {
-      "index": 570,
+      "index": 573,
       "link_unit": "libgit2",
       "module": "src/libgit2/refs.c",
       "foundational": false,
       "layer": 3,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [],
         "cut": []
@@ -7158,7 +7290,7 @@
           "module": "src/libgit2/refs.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_reference",
@@ -7168,18 +7300,20 @@
               "home": "src/libgit2/src/libgit2/refs.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "cf81160ecaa0b64da554f979d4fc9b473bbb744a"
+          ]
         }
       ]
     },
     {
-      "index": 571,
+      "index": 574,
       "link_unit": "libgit2",
       "module": "src/libgit2/annotated_commit.c",
       "foundational": false,
       "layer": 4,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [],
         "cut": []
@@ -7197,7 +7331,7 @@
           "module": "src/libgit2/annotated_commit.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_annotated_commit",
@@ -7207,21 +7341,23 @@
               "home": "src/libgit2/src/libgit2/annotated_commit.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "edf9d78206c30e7defeaffc832ea227277572aa5"
+          ]
         }
       ]
     },
     {
-      "index": 572,
+      "index": 575,
       "link_unit": "libgit2",
       "module": "src/libgit2/commit.c",
       "foundational": false,
       "layer": 4,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          569
+          572
         ],
         "cut": []
       },
@@ -7238,7 +7374,7 @@
           "module": "src/libgit2/commit.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_commit",
@@ -7258,18 +7394,21 @@
               "home": "src/libgit2/src/libgit2/commit.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "5e49e3c75674c885a170ac2d204a43dd121a08d6",
+            "452c409b27745f7a435d44c2f1a599756e929fd3"
+          ]
         }
       ]
     },
     {
-      "index": 573,
+      "index": 576,
       "link_unit": "libgit2",
       "module": "src/libgit2/index.c",
       "foundational": false,
       "layer": 4,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [],
         "cut": []
@@ -7287,7 +7426,7 @@
           "module": "src/libgit2/index.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_index",
@@ -7297,18 +7436,20 @@
               "home": "src/libgit2/src/libgit2/index.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "511c8ab6f47368c322abac9109e9b04368074021"
+          ]
         }
       ]
     },
     {
-      "index": 574,
+      "index": 577,
       "link_unit": "libgit2",
       "module": "src/libgit2/refdb.c",
       "foundational": false,
       "layer": 4,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [],
         "cut": []
@@ -7326,7 +7467,7 @@
           "module": "src/libgit2/refdb.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_refdb",
@@ -7336,18 +7477,20 @@
               "home": "src/libgit2/src/libgit2/refdb.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "a45e7e2b531c42388f693c295c333686217123d5"
+          ]
         }
       ]
     },
     {
-      "index": 575,
+      "index": 578,
       "link_unit": "libgit2",
       "module": "src/libgit2/worktree.c",
       "foundational": false,
       "layer": 4,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [],
         "cut": []
@@ -7365,7 +7508,7 @@
           "module": "src/libgit2/worktree.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_worktree",
@@ -7375,31 +7518,33 @@
               "home": "src/libgit2/src/libgit2/worktree.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "71f45e324f151a0a93cf0b33461dded29a8670cf"
+          ]
         }
       ]
     },
     {
-      "index": 576,
+      "index": 579,
       "link_unit": "libgit2",
       "module": "src/libgit2/repository.c",
       "foundational": false,
       "layer": 1,
       "sublayer": 1,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          524,
-          529,
-          546,
-          558,
-          568,
-          570,
+          527,
+          532,
+          549,
+          561,
           571,
-          572,
           573,
           574,
-          575
+          575,
+          576,
+          577,
+          578
         ],
         "cut": []
       },
@@ -7416,7 +7561,7 @@
           "module": "src/libgit2/repository.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_repository__cleanup",
@@ -7559,7 +7704,10 @@
               "home": "src/libgit2/src/libgit2/repository.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "8eb44bc1dd52373762bfaf73770c89282b22480c",
+            "b78596a8f03aa8b96e771c938adff48b283b5987"
+          ]
         },
         {
           "index": 1,
@@ -7567,7 +7715,7 @@
           "module": "src/libgit2/repository.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_repository_is_empty",
@@ -7745,7 +7893,11 @@
               "home": "src/libgit2/src/libgit2/repository.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "2a6ef804903d3d2c84f76d19cfe6912eac0e1e82",
+            "8eb44bc1dd52373762bfaf73770c89282b22480c",
+            "b78596a8f03aa8b96e771c938adff48b283b5987"
+          ]
         },
         {
           "index": 2,
@@ -7753,7 +7905,7 @@
           "module": "src/libgit2/repository.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_repository_set_namespace",
@@ -7826,12 +7978,15 @@
               "home": "src/libgit2/src/libgit2/repository.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "f5ddbc6669d15cb11fdaf9e888c370b240fb5007",
+            "2a6ef804903d3d2c84f76d19cfe6912eac0e1e82"
+          ]
         }
       ]
     },
     {
-      "index": 577,
+      "index": 580,
       "link_unit": "libgit2",
       "module": "src/libgit2/transports/credential_helpers.c",
       "foundational": false,
@@ -7840,8 +7995,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          535,
-          559
+          538,
+          562
         ],
         "cut": []
       },
@@ -7873,7 +8028,7 @@
       ]
     },
     {
-      "index": 578,
+      "index": 581,
       "link_unit": "libgit2",
       "module": "src/libgit2/diff.c",
       "foundational": false,
@@ -7882,8 +8037,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          550,
-          561
+          553,
+          564
         ],
         "cut": []
       },
@@ -7977,19 +8132,19 @@
       ]
     },
     {
-      "index": 579,
+      "index": 582,
       "link_unit": "libgit2",
       "module": "src/libgit2/odb.c",
       "foundational": false,
       "layer": 1,
       "sublayer": 3,
-      "status": "todo",
+      "status": "wip",
       "depends_on": {
         "scheduled": [
-          526,
           529,
-          546,
-          564
+          532,
+          549,
+          567
         ],
         "cut": []
       },
@@ -8006,7 +8161,7 @@
           "module": "src/libgit2/odb.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_odb_stream",
@@ -8039,7 +8194,9 @@
               "home": "src/libgit2/src/libgit2/odb.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "3f43c106d582faf37b65768c5ede4907b3bee779"
+          ]
         },
         {
           "index": 1,
@@ -8097,7 +8254,7 @@
       ]
     },
     {
-      "index": 580,
+      "index": 583,
       "link_unit": "libgit2",
       "module": "src/libgit2/diff.c",
       "foundational": false,
@@ -8106,10 +8263,10 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          532,
-          550,
-          561,
-          578
+          535,
+          553,
+          564,
+          581
         ],
         "cut": []
       },
@@ -8181,7 +8338,7 @@
       ]
     },
     {
-      "index": 581,
+      "index": 584,
       "link_unit": "libgit2",
       "module": "src/libgit2/odb.c",
       "foundational": false,
@@ -8190,10 +8347,10 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          529,
-          540,
-          546,
-          579
+          532,
+          543,
+          549,
+          582
         ],
         "cut": []
       },
@@ -8267,7 +8424,7 @@
       ]
     },
     {
-      "index": 582,
+      "index": 585,
       "link_unit": "libgit2",
       "module": "src/libgit2/diff.c",
       "foundational": false,
@@ -8276,7 +8433,7 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          580
+          583
         ],
         "cut": []
       },
@@ -8308,7 +8465,7 @@
       ]
     },
     {
-      "index": 583,
+      "index": 586,
       "link_unit": "libgit2",
       "module": "src/libgit2/attr.c",
       "foundational": false,
@@ -8317,8 +8474,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          529,
-          558
+          532,
+          561
         ],
         "cut": []
       },
@@ -8401,7 +8558,7 @@
       ]
     },
     {
-      "index": 584,
+      "index": 587,
       "link_unit": "libgit2",
       "module": "src/libgit2/attrcache.c",
       "foundational": false,
@@ -8410,7 +8567,7 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          558
+          561
         ],
         "cut": []
       },
@@ -8442,17 +8599,17 @@
       ]
     },
     {
-      "index": 585,
+      "index": 588,
       "link_unit": "libgit2",
       "module": "src/libgit2/config.c",
       "foundational": false,
       "layer": 2,
       "sublayer": 1,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          524,
-          568
+          527,
+          571
         ],
         "cut": []
       },
@@ -8469,7 +8626,7 @@
           "module": "src/libgit2/config.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_config_entry",
@@ -8486,7 +8643,9 @@
               "home": "src/libgit2/src/libgit2/config.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "7b863057e2fd97a6827b7d425f0af7f20cbe6b4b"
+          ]
         },
         {
           "index": 1,
@@ -8494,7 +8653,7 @@
           "module": "src/libgit2/config.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_configmap",
@@ -8508,7 +8667,9 @@
               "home": "src/libgit2/src/libgit2/config.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "7b863057e2fd97a6827b7d425f0af7f20cbe6b4b"
+          ]
         },
         {
           "index": 2,
@@ -8516,7 +8677,7 @@
           "module": "src/libgit2/config.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_config_find_global",
@@ -8568,21 +8729,24 @@
               "home": "src/libgit2/src/libgit2/config.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "da8073d6718e6d9664b485f1303302d9134bfae8",
+            "053b4d7ffc0957c81891bc84c0079fb6e3af76f0"
+          ]
         }
       ]
     },
     {
-      "index": 586,
+      "index": 589,
       "link_unit": "libgit2",
       "module": "src/libgit2/diff_parse.c",
       "foundational": false,
       "layer": 2,
       "sublayer": 0,
-      "status": "todo",
+      "status": "wip",
       "depends_on": {
         "scheduled": [
-          550
+          553
         ],
         "cut": []
       },
@@ -8599,7 +8763,7 @@
           "module": "src/libgit2/diff_parse.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_diff_parse_options",
@@ -8612,7 +8776,9 @@
               "home": "src/libgit2/src/libgit2/diff_parse.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "0fcf482abed8c79cdcfdfab4221ba6e38f9c134c"
+          ]
         },
         {
           "index": 1,
@@ -8635,7 +8801,7 @@
       ]
     },
     {
-      "index": 587,
+      "index": 590,
       "link_unit": "libgit2",
       "module": "src/libgit2/diff_stats.c",
       "foundational": false,
@@ -8674,7 +8840,7 @@
       ]
     },
     {
-      "index": 588,
+      "index": 591,
       "link_unit": "libgit2",
       "module": "src/libgit2/diff_tform.c",
       "foundational": false,
@@ -8683,8 +8849,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          550,
-          578
+          553,
+          581
         ],
         "cut": []
       },
@@ -8723,16 +8889,16 @@
       ]
     },
     {
-      "index": 589,
+      "index": 592,
       "link_unit": "libgit2",
       "module": "src/libgit2/fetchhead.c",
       "foundational": false,
       "layer": 2,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          558
+          561
         ],
         "cut": []
       },
@@ -8749,7 +8915,7 @@
           "module": "src/libgit2/fetchhead.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_repository_fetchhead_foreach",
@@ -8759,24 +8925,26 @@
               "home": "src/libgit2/src/libgit2/fetchhead.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "b78596a8f03aa8b96e771c938adff48b283b5987"
+          ]
         }
       ]
     },
     {
-      "index": 590,
+      "index": 593,
       "link_unit": "libgit2",
       "module": "src/libgit2/filter.c",
       "foundational": false,
       "layer": 2,
       "sublayer": 0,
-      "status": "todo",
+      "status": "wip",
       "depends_on": {
         "scheduled": [
-          529
+          532
         ],
         "cut": [
-          605
+          608
         ]
       },
       "budgets": {
@@ -8792,24 +8960,8 @@
           "module": "src/libgit2/filter.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
-            {
-              "name": "git_filter",
-              "defined_in": "include/git2/sys/filter.h",
-              "kind": "type",
-              "field_anchors": [
-                "cleanup",
-                "initialize",
-                "shutdown",
-                "check",
-                "reserved",
-                "version",
-                "stream",
-                "attributes"
-              ],
-              "home": "src/libgit2/src/libgit2/filter.rs"
-            },
             {
               "name": "git_filter_list",
               "defined_in": "src/libgit2/filter.c",
@@ -8818,7 +8970,9 @@
               "home": "src/libgit2/src/libgit2/filter.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "b7b4fa7a3b367f263ddc5ea7946d9afe29d08b41"
+          ]
         },
         {
           "index": 1,
@@ -8856,7 +9010,7 @@
           "module": "src/libgit2/filter.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_writestream",
@@ -8870,7 +9024,9 @@
               "home": "src/libgit2/src/libgit2/filter.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "4d470d62fb360b4ea0ad9af2a5769170e3c7393c"
+          ]
         },
         {
           "index": 3,
@@ -8889,11 +9045,38 @@
             }
           ],
           "commits": []
+        },
+        {
+          "index": 4,
+          "link_unit": "libgit2",
+          "module": "src/libgit2/filter.c",
+          "foundational": false,
+          "kind": "wrap",
+          "status": "todo",
+          "items": [
+            {
+              "name": "git_filter",
+              "defined_in": "include/git2/sys/filter.h",
+              "kind": "type",
+              "field_anchors": [
+                "cleanup",
+                "initialize",
+                "shutdown",
+                "check",
+                "reserved",
+                "version",
+                "stream",
+                "attributes"
+              ],
+              "home": "src/libgit2/src/libgit2/filter.rs"
+            }
+          ],
+          "commits": []
         }
       ]
     },
     {
-      "index": 591,
+      "index": 594,
       "link_unit": "libgit2",
       "module": "src/libgit2/graph.c",
       "foundational": false,
@@ -8902,8 +9085,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          529,
-          558
+          532,
+          561
         ],
         "cut": []
       },
@@ -8949,7 +9132,7 @@
       ]
     },
     {
-      "index": 592,
+      "index": 595,
       "link_unit": "libgit2",
       "module": "src/libgit2/ignore.c",
       "foundational": false,
@@ -8958,7 +9141,7 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          558
+          561
         ],
         "cut": []
       },
@@ -9004,17 +9187,17 @@
       ]
     },
     {
-      "index": 593,
+      "index": 596,
       "link_unit": "libgit2",
       "module": "src/libgit2/object.c",
       "foundational": false,
       "layer": 2,
       "sublayer": 1,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          569,
-          590
+          572,
+          593
         ],
         "cut": []
       },
@@ -9031,7 +9214,7 @@
           "module": "src/libgit2/object.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_object_id_options",
@@ -9046,7 +9229,9 @@
               "home": "src/libgit2/src/libgit2/object.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "6e89221dac47d4254095770a2b3fdff99170e63d"
+          ]
         },
         {
           "index": 1,
@@ -9054,7 +9239,7 @@
           "module": "src/libgit2/object.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_object_rawcontent_is_valid",
@@ -9085,12 +9270,14 @@
               "home": "src/libgit2/src/libgit2/object.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "498a66fc17e9767886c304f979f65f110aef34bc"
+          ]
         }
       ]
     },
     {
-      "index": 594,
+      "index": 597,
       "link_unit": "libgit2",
       "module": "src/libgit2/odb_loose.c",
       "foundational": false,
@@ -9136,7 +9323,7 @@
       ]
     },
     {
-      "index": 595,
+      "index": 598,
       "link_unit": "libgit2",
       "module": "src/libgit2/odb_pack.c",
       "foundational": false,
@@ -9178,7 +9365,7 @@
       ]
     },
     {
-      "index": 596,
+      "index": 599,
       "link_unit": "libgit2",
       "module": "src/libgit2/patch.c",
       "foundational": false,
@@ -9217,7 +9404,7 @@
       ]
     },
     {
-      "index": 597,
+      "index": 600,
       "link_unit": "libgit2",
       "module": "src/libgit2/revwalk.c",
       "foundational": false,
@@ -9226,7 +9413,7 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          529
+          532
         ],
         "cut": []
       },
@@ -9276,13 +9463,13 @@
       ]
     },
     {
-      "index": 598,
+      "index": 601,
       "link_unit": "libgit2",
       "module": "src/libgit2/signature.c",
       "foundational": false,
       "layer": 2,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [],
         "cut": []
@@ -9300,7 +9487,7 @@
           "module": "src/libgit2/signature.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_signature",
@@ -9325,12 +9512,15 @@
               "home": "src/libgit2/src/libgit2/signature.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "46db9fe31fe68ac2c53e571b73f28e52f7935f11",
+            "92cba445b298e6b6d404f112045ce039de7cc2dc"
+          ]
         }
       ]
     },
     {
-      "index": 599,
+      "index": 602,
       "link_unit": "libgit2",
       "module": "src/libgit2/attr.c",
       "foundational": false,
@@ -9339,8 +9529,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          558,
-          583
+          561,
+          586
         ],
         "cut": []
       },
@@ -9400,13 +9590,13 @@
       ]
     },
     {
-      "index": 600,
+      "index": 603,
       "link_unit": "libgit2",
       "module": "src/libgit2/transaction.c",
       "foundational": false,
       "layer": 4,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [],
         "cut": []
@@ -9424,7 +9614,7 @@
           "module": "src/libgit2/transaction.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_transaction",
@@ -9434,25 +9624,27 @@
               "home": "src/libgit2/src/libgit2/transaction.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "f3e17471a26e02ca24bedc928444aa1d00212c0e"
+          ]
         }
       ]
     },
     {
-      "index": 601,
+      "index": 604,
       "link_unit": "libgit2",
       "module": "src/libgit2/config.c",
       "foundational": false,
       "layer": 2,
       "sublayer": 2,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          524,
-          558,
-          568,
-          585,
-          600
+          527,
+          561,
+          571,
+          588,
+          603
         ],
         "cut": []
       },
@@ -9469,7 +9661,7 @@
           "module": "src/libgit2/config.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_config_backend_entry",
@@ -9482,7 +9674,9 @@
               "home": "src/libgit2/src/libgit2/config.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "440b91983c68b1c819f9184ff1db33deb905b290"
+          ]
         },
         {
           "index": 1,
@@ -9490,7 +9684,7 @@
           "module": "src/libgit2/config.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_config_add_file_ondisk",
@@ -9668,7 +9862,10 @@
               "home": "src/libgit2/src/libgit2/config.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "053b4d7ffc0957c81891bc84c0079fb6e3af76f0",
+            "238b7a9b206a3cc90a546a0255be0f1b9a20a453"
+          ]
         },
         {
           "index": 2,
@@ -9676,7 +9873,7 @@
           "module": "src/libgit2/config.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_config_set_string",
@@ -9700,12 +9897,14 @@
               "home": "src/libgit2/src/libgit2/config.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "a8ea6dddb3832ee372e69d8f63e916f504c69834"
+          ]
         }
       ]
     },
     {
-      "index": 602,
+      "index": 605,
       "link_unit": "libgit2",
       "module": "src/libgit2/diff_parse.c",
       "foundational": false,
@@ -9714,8 +9913,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          550,
-          586
+          553,
+          589
         ],
         "cut": []
       },
@@ -9747,7 +9946,7 @@
       ]
     },
     {
-      "index": 603,
+      "index": 606,
       "link_unit": "libgit2",
       "module": "src/libgit2/diff_stats.c",
       "foundational": false,
@@ -9756,9 +9955,9 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          524,
-          550,
-          587
+          527,
+          553,
+          590
         ],
         "cut": []
       },
@@ -9825,16 +10024,16 @@
       ]
     },
     {
-      "index": 604,
+      "index": 607,
       "link_unit": "libgit2",
       "module": "src/libgit2/blob.c",
       "foundational": false,
       "layer": 3,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          569
+          572
         ],
         "cut": []
       },
@@ -9851,7 +10050,7 @@
           "module": "src/libgit2/blob.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_blob",
@@ -9861,12 +10060,14 @@
               "home": "src/libgit2/src/libgit2/blob.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "fd1b40c3243b47d238314a951b367878a63e938d"
+          ]
         }
       ]
     },
     {
-      "index": 605,
+      "index": 608,
       "link_unit": "libgit2",
       "module": "src/libgit2/filter.c",
       "foundational": false,
@@ -9875,11 +10076,11 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          524,
-          529,
-          558,
-          590,
-          604
+          527,
+          532,
+          561,
+          593,
+          607
         ],
         "cut": []
       },
@@ -10111,20 +10312,20 @@
       ]
     },
     {
-      "index": 606,
+      "index": 609,
       "link_unit": "libgit2",
       "module": "src/libgit2/object.c",
       "foundational": false,
       "layer": 2,
       "sublayer": 2,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          524,
-          529,
-          558,
-          569,
-          593
+          527,
+          532,
+          561,
+          572,
+          596
         ],
         "cut": []
       },
@@ -10141,7 +10342,7 @@
           "module": "src/libgit2/object.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_object_dup",
@@ -10235,12 +10436,17 @@
               "home": "src/libgit2/src/libgit2/object.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "498a66fc17e9767886c304f979f65f110aef34bc",
+            "fc73df8654805c0b637d2f1d3e1f5725e70fb342",
+            "f98dbf383092b22fa405e3a55798e5ba0e138625",
+            "639d7dc658062babb0e00e0d9124838e50160c8e"
+          ]
         }
       ]
     },
     {
-      "index": 607,
+      "index": 610,
       "link_unit": "libgit2",
       "module": "src/libgit2/odb_loose.c",
       "foundational": false,
@@ -10249,8 +10455,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          564,
-          594
+          567,
+          597
         ],
         "cut": []
       },
@@ -10289,7 +10495,7 @@
       ]
     },
     {
-      "index": 608,
+      "index": 611,
       "link_unit": "libgit2",
       "module": "src/libgit2/odb_pack.c",
       "foundational": false,
@@ -10298,8 +10504,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          564,
-          595
+          567,
+          598
         ],
         "cut": []
       },
@@ -10345,7 +10551,7 @@
       ]
     },
     {
-      "index": 609,
+      "index": 612,
       "link_unit": "libgit2",
       "module": "src/libgit2/patch.c",
       "foundational": false,
@@ -10354,10 +10560,10 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          550,
-          558,
+          553,
           561,
-          596
+          564,
+          599
         ],
         "cut": []
       },
@@ -10452,13 +10658,13 @@
       ]
     },
     {
-      "index": 610,
+      "index": 613,
       "link_unit": "libgit2",
       "module": "src/libgit2/pathspec.c",
       "foundational": false,
       "layer": 5,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [],
         "cut": []
@@ -10476,7 +10682,7 @@
           "module": "src/libgit2/pathspec.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_pathspec",
@@ -10486,12 +10692,14 @@
               "home": "src/libgit2/src/libgit2/pathspec.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "0baeb383c52133f41e2a3d717f3375d0fc79c7ac"
+          ]
         }
       ]
     },
     {
-      "index": 611,
+      "index": 614,
       "link_unit": "libgit2",
       "module": "src/libgit2/revwalk.c",
       "foundational": false,
@@ -10500,10 +10708,10 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          529,
-          558,
-          597,
-          610
+          532,
+          561,
+          600,
+          613
         ],
         "cut": []
       },
@@ -10654,17 +10862,17 @@
       ]
     },
     {
-      "index": 612,
+      "index": 615,
       "link_unit": "libgit2",
       "module": "src/libgit2/signature.c",
       "foundational": false,
       "layer": 2,
       "sublayer": 1,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          558,
-          598
+          561,
+          601
         ],
         "cut": []
       },
@@ -10681,7 +10889,7 @@
           "module": "src/libgit2/signature.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_signature_default",
@@ -10733,26 +10941,28 @@
               "home": "src/libgit2/src/libgit2/signature.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "639d7dc658062babb0e00e0d9124838e50160c8e"
+          ]
         }
       ]
     },
     {
-      "index": 613,
+      "index": 616,
       "link_unit": "libgit2",
       "module": "src/libgit2/config.c",
       "foundational": false,
       "layer": 2,
       "sublayer": 3,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          558,
-          568,
-          601
+          561,
+          571,
+          604
         ],
         "cut": [
-          614
+          617
         ]
       },
       "budgets": {
@@ -10768,7 +10978,7 @@
           "module": "src/libgit2/config.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_config_backend",
@@ -10793,7 +11003,10 @@
               "home": "src/libgit2/src/libgit2/config.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "9300e6dd32ab8ae8b5199ef5211fafc802c679a4",
+            "1d2ef284f07fb75e285a58977f9b18e6ccb185e6"
+          ]
         },
         {
           "index": 1,
@@ -10801,7 +11014,7 @@
           "module": "src/libgit2/config.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_config_foreach",
@@ -10825,24 +11038,26 @@
               "home": "src/libgit2/src/libgit2/config.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "ffa7585fa51032b5eedcb0232fb3044ec24e3d2b"
+          ]
         }
       ]
     },
     {
-      "index": 614,
+      "index": 617,
       "link_unit": "libgit2",
       "module": "src/libgit2/config.c",
       "foundational": false,
       "layer": 2,
       "sublayer": 4,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          558,
-          568,
-          601,
-          613
+          561,
+          571,
+          604,
+          616
         ],
         "cut": []
       },
@@ -10859,7 +11074,7 @@
           "module": "src/libgit2/config.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_config_iterator",
@@ -10874,7 +11089,9 @@
               "home": "src/libgit2/src/libgit2/config.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "ab793f9ca745ff8c8d396dac8e63c3d4b64cae0c"
+          ]
         },
         {
           "index": 1,
@@ -10882,7 +11099,7 @@
           "module": "src/libgit2/config.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_config_add_backend",
@@ -10906,23 +11123,25 @@
               "home": "src/libgit2/src/libgit2/config.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "bf8144af89e35371192e69d9798531ccc64f482c"
+          ]
         }
       ]
     },
     {
-      "index": 615,
+      "index": 618,
       "link_unit": "libgit2",
       "module": "src/libgit2/config.c",
       "foundational": false,
       "layer": 2,
       "sublayer": 5,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          568,
-          585,
-          614
+          571,
+          588,
+          617
         ],
         "cut": []
       },
@@ -10939,7 +11158,7 @@
           "module": "src/libgit2/config.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_config_iterator_free",
@@ -10977,12 +11196,14 @@
               "home": "src/libgit2/src/libgit2/config.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "3d8a8b6624637095640fc4a8975a2af5c6525f41"
+          ]
         }
       ]
     },
     {
-      "index": 616,
+      "index": 619,
       "link_unit": "libgit2",
       "module": "src/libgit2/blame.c",
       "foundational": false,
@@ -10991,8 +11212,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          529,
-          598
+          532,
+          601
         ],
         "cut": []
       },
@@ -11091,19 +11312,19 @@
       ]
     },
     {
-      "index": 617,
+      "index": 620,
       "link_unit": "libgit2",
       "module": "src/libgit2/blob.c",
       "foundational": false,
       "layer": 3,
       "sublayer": 1,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          529,
-          558,
-          590,
-          604
+          532,
+          561,
+          593,
+          607
         ],
         "cut": []
       },
@@ -11120,7 +11341,7 @@
           "module": "src/libgit2/blob.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_blob_filter_options",
@@ -11135,7 +11356,9 @@
               "home": "src/libgit2/src/libgit2/blob.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "fd1b40c3243b47d238314a951b367878a63e938d"
+          ]
         },
         {
           "index": 1,
@@ -11143,7 +11366,7 @@
           "module": "src/libgit2/blob.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_blob_create_from_buffer",
@@ -11188,12 +11411,15 @@
               "home": "src/libgit2/src/libgit2/blob.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "34d8e822d51a3f0944755ad1675b23b5f630da6f",
+            "fc73df8654805c0b637d2f1d3e1f5725e70fb342"
+          ]
         }
       ]
     },
     {
-      "index": 618,
+      "index": 621,
       "link_unit": "libgit2",
       "module": "src/libgit2/commit_graph.c",
       "foundational": false,
@@ -11202,7 +11428,7 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          563
+          566
         ],
         "cut": []
       },
@@ -11268,13 +11494,13 @@
       ]
     },
     {
-      "index": 619,
+      "index": 622,
       "link_unit": "libgit2",
       "module": "src/libgit2/config_mem.c",
       "foundational": false,
       "layer": 3,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [],
         "cut": []
@@ -11292,7 +11518,7 @@
           "module": "src/libgit2/config_mem.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_config_backend_memory_options",
@@ -11306,12 +11532,14 @@
               "home": "src/libgit2/src/libgit2/config_mem.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "128cf1549eedcb1bd384cb16158e1197d2b482bf"
+          ]
         }
       ]
     },
     {
-      "index": 620,
+      "index": 623,
       "link_unit": "libgit2",
       "module": "src/libgit2/describe.c",
       "foundational": false,
@@ -11387,7 +11615,7 @@
       ]
     },
     {
-      "index": 621,
+      "index": 624,
       "link_unit": "libgit2",
       "module": "src/libgit2/diff_print.c",
       "foundational": false,
@@ -11396,11 +11624,11 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          524,
-          550,
-          561,
-          578,
-          596
+          527,
+          553,
+          564,
+          581,
+          599
         ],
         "cut": []
       },
@@ -11474,13 +11702,13 @@
       ]
     },
     {
-      "index": 622,
+      "index": 625,
       "link_unit": "libgit2",
       "module": "src/libgit2/mailmap.c",
       "foundational": false,
       "layer": 3,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [],
         "cut": []
@@ -11498,7 +11726,7 @@
           "module": "src/libgit2/mailmap.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_mailmap",
@@ -11508,12 +11736,14 @@
               "home": "src/libgit2/src/libgit2/mailmap.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "09ed5d252e6e4ea129065f952bf5f63612c82e74"
+          ]
         }
       ]
     },
     {
-      "index": 623,
+      "index": 626,
       "link_unit": "libgit2",
       "module": "src/libgit2/pack-objects.c",
       "foundational": false,
@@ -11577,7 +11807,7 @@
       ]
     },
     {
-      "index": 624,
+      "index": 627,
       "link_unit": "libgit2",
       "module": "src/libgit2/reflog.c",
       "foundational": false,
@@ -11586,7 +11816,7 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          558
+          561
         ],
         "cut": []
       },
@@ -11650,7 +11880,7 @@
       ]
     },
     {
-      "index": 625,
+      "index": 628,
       "link_unit": "libgit2",
       "module": "src/libgit2/refdb.c",
       "foundational": false,
@@ -11659,8 +11889,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          570,
-          574
+          573,
+          577
         ],
         "cut": []
       },
@@ -11697,7 +11927,7 @@
       ]
     },
     {
-      "index": 626,
+      "index": 629,
       "link_unit": "libgit2",
       "module": "src/libgit2/refs.c",
       "foundational": false,
@@ -11706,11 +11936,11 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          529,
           532,
-          558,
-          570,
-          625
+          535,
+          561,
+          573,
+          628
         ],
         "cut": []
       },
@@ -11819,20 +12049,20 @@
       ]
     },
     {
-      "index": 627,
+      "index": 630,
       "link_unit": "libgit2",
       "module": "src/libgit2/tag.c",
       "foundational": false,
       "layer": 3,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          529,
           532,
-          558,
-          569,
-          598
+          535,
+          561,
+          572,
+          601
         ],
         "cut": []
       },
@@ -11849,7 +12079,7 @@
           "module": "src/libgit2/tag.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_tag",
@@ -11859,7 +12089,9 @@
               "home": "src/libgit2/src/libgit2/tag.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "39fdee0a644b5bb993556881f0beb7252f77cbaa"
+          ]
         },
         {
           "index": 1,
@@ -11867,7 +12099,7 @@
           "module": "src/libgit2/tag.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_tag_annotation_create",
@@ -11933,22 +12165,26 @@
               "home": "src/libgit2/src/libgit2/tag.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "34d8e822d51a3f0944755ad1675b23b5f630da6f",
+            "498a66fc17e9767886c304f979f65f110aef34bc",
+            "639d7dc658062babb0e00e0d9124838e50160c8e"
+          ]
         }
       ]
     },
     {
-      "index": 628,
+      "index": 631,
       "link_unit": "libgit2",
       "module": "src/libgit2/tree.c",
       "foundational": false,
       "layer": 3,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          529,
-          569
+          532,
+          572
         ],
         "cut": []
       },
@@ -11965,7 +12201,7 @@
           "module": "src/libgit2/tree.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_tree",
@@ -11982,7 +12218,10 @@
               "home": "src/libgit2/src/libgit2/tree.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "3caf61098fb32208293ee95b6d353691d6d70c8b",
+            "39fdee0a644b5bb993556881f0beb7252f77cbaa"
+          ]
         },
         {
           "index": 1,
@@ -11990,7 +12229,7 @@
           "module": "src/libgit2/tree.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_tree_update",
@@ -12012,12 +12251,15 @@
               "home": "src/libgit2/src/libgit2/tree.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "40896345bef4088e8a91162e3a6bebfb6f833b6d",
+            "df35545339d509b19fc3db680f7bcc3496871e03"
+          ]
         }
       ]
     },
     {
-      "index": 629,
+      "index": 632,
       "link_unit": "libgit2",
       "module": "src/libgit2/blame.c",
       "foundational": false,
@@ -12026,8 +12268,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          558,
-          616
+          561,
+          619
         ],
         "cut": []
       },
@@ -12115,18 +12357,18 @@
       ]
     },
     {
-      "index": 630,
+      "index": 633,
       "link_unit": "libgit2",
       "module": "src/libgit2/blob.c",
       "foundational": false,
       "layer": 3,
       "sublayer": 2,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          524,
-          604,
-          617
+          527,
+          607,
+          620
         ],
         "cut": []
       },
@@ -12143,7 +12385,7 @@
           "module": "src/libgit2/blob.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_blob_filter",
@@ -12181,12 +12423,14 @@
               "home": "src/libgit2/src/libgit2/blob.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "1cb42ac562ace9df520426ac6d6b138cd0247a41"
+          ]
         }
       ]
     },
     {
-      "index": 631,
+      "index": 634,
       "link_unit": "libgit2",
       "module": "src/libgit2/commit_graph.c",
       "foundational": false,
@@ -12195,11 +12439,11 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          524,
-          558,
-          563,
-          597,
-          618
+          527,
+          561,
+          566,
+          600,
+          621
         ],
         "cut": []
       },
@@ -12294,17 +12538,17 @@
       ]
     },
     {
-      "index": 632,
+      "index": 635,
       "link_unit": "libgit2",
       "module": "src/libgit2/config_mem.c",
       "foundational": false,
       "layer": 3,
       "sublayer": 1,
-      "status": "todo",
+      "status": "wip",
       "depends_on": {
         "scheduled": [
-          613,
-          619
+          616,
+          622
         ],
         "cut": []
       },
@@ -12317,6 +12561,26 @@
       "batches": [
         {
           "index": 0,
+          "link_unit": "libgit2",
+          "module": "src/libgit2/config_mem.c",
+          "foundational": false,
+          "kind": "wrap",
+          "status": "done",
+          "items": [
+            {
+              "name": "git_config_backend_memory_options_init",
+              "defined_in": "src/libgit2/config_mem.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/config_mem.rs"
+            }
+          ],
+          "commits": [
+            "053b4d7ffc0957c81891bc84c0079fb6e3af76f0"
+          ]
+        },
+        {
+          "index": 1,
           "link_unit": "libgit2",
           "module": "src/libgit2/config_mem.c",
           "foundational": false,
@@ -12336,13 +12600,6 @@
               "kind": "symbol",
               "field_anchors": [],
               "home": "src/libgit2/src/libgit2/config_mem.rs"
-            },
-            {
-              "name": "git_config_backend_memory_options_init",
-              "defined_in": "src/libgit2/config_mem.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/config_mem.rs"
             }
           ],
           "commits": []
@@ -12350,7 +12607,7 @@
       ]
     },
     {
-      "index": 633,
+      "index": 636,
       "link_unit": "libgit2",
       "module": "src/libgit2/describe.c",
       "foundational": false,
@@ -12359,10 +12616,10 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          524,
-          558,
-          569,
-          620
+          527,
+          561,
+          572,
+          623
         ],
         "cut": []
       },
@@ -12429,18 +12686,18 @@
       ]
     },
     {
-      "index": 634,
+      "index": 637,
       "link_unit": "libgit2",
       "module": "src/libgit2/mailmap.c",
       "foundational": false,
       "layer": 3,
       "sublayer": 1,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          558,
-          598,
-          622
+          561,
+          601,
+          625
         ],
         "cut": []
       },
@@ -12457,7 +12714,7 @@
           "module": "src/libgit2/mailmap.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_mailmap_add_entry",
@@ -12509,12 +12766,15 @@
               "home": "src/libgit2/src/libgit2/mailmap.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "fc73df8654805c0b637d2f1d3e1f5725e70fb342",
+            "f98dbf383092b22fa405e3a55798e5ba0e138625"
+          ]
         }
       ]
     },
     {
-      "index": 635,
+      "index": 638,
       "link_unit": "libgit2",
       "module": "src/libgit2/pack-objects.c",
       "foundational": false,
@@ -12523,12 +12783,12 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          524,
-          529,
-          540,
-          558,
-          597,
-          623
+          527,
+          532,
+          543,
+          561,
+          600,
+          626
         ],
         "cut": []
       },
@@ -12658,7 +12918,7 @@
       ]
     },
     {
-      "index": 636,
+      "index": 639,
       "link_unit": "libgit2",
       "module": "src/libgit2/reflog.c",
       "foundational": false,
@@ -12667,10 +12927,10 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          529,
-          558,
-          598,
-          624
+          532,
+          561,
+          601,
+          627
         ],
         "cut": []
       },
@@ -12772,7 +13032,7 @@
       ]
     },
     {
-      "index": 637,
+      "index": 640,
       "link_unit": "libgit2",
       "module": "src/libgit2/refs.c",
       "foundational": false,
@@ -12781,12 +13041,12 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          529,
-          558,
-          569,
-          570,
-          625,
-          626
+          532,
+          561,
+          572,
+          573,
+          628,
+          629
         ],
         "cut": []
       },
@@ -13046,20 +13306,20 @@
       ]
     },
     {
-      "index": 638,
+      "index": 641,
       "link_unit": "libgit2",
       "module": "src/libgit2/tag.c",
       "foundational": false,
       "layer": 3,
       "sublayer": 1,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          529,
-          558,
-          569,
-          598,
-          627
+          532,
+          561,
+          572,
+          601,
+          630
         ],
         "cut": []
       },
@@ -13076,7 +13336,7 @@
           "module": "src/libgit2/tag.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_tag_foreach",
@@ -13135,24 +13395,26 @@
               "home": "src/libgit2/src/libgit2/tag.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "639d7dc658062babb0e00e0d9124838e50160c8e"
+          ]
         }
       ]
     },
     {
-      "index": 639,
+      "index": 642,
       "link_unit": "libgit2",
       "module": "src/libgit2/tree.c",
       "foundational": false,
       "layer": 3,
       "sublayer": 1,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          529,
-          558,
-          569,
-          628
+          532,
+          561,
+          572,
+          631
         ],
         "cut": []
       },
@@ -13169,7 +13431,7 @@
           "module": "src/libgit2/tree.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_tree_create_updated",
@@ -13347,12 +13609,17 @@
               "home": "src/libgit2/src/libgit2/tree.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "717579bd0b5cbf457290fc767f85150c7e055c62",
+            "498a66fc17e9767886c304f979f65f110aef34bc",
+            "9fa1335f735a9969d579bd8b0b0be3c1ff4a2d06",
+            "639d7dc658062babb0e00e0d9124838e50160c8e"
+          ]
         }
       ]
     },
     {
-      "index": 640,
+      "index": 643,
       "link_unit": "libgit2",
       "module": "src/libgit2/refs.c",
       "foundational": false,
@@ -13361,8 +13628,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          558,
-          637
+          561,
+          640
         ],
         "cut": []
       },
@@ -13394,17 +13661,17 @@
       ]
     },
     {
-      "index": 641,
+      "index": 644,
       "link_unit": "libgit2",
       "module": "src/libgit2/tree.c",
       "foundational": false,
       "layer": 3,
       "sublayer": 2,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          628,
-          639
+          631,
+          642
         ],
         "cut": []
       },
@@ -13421,7 +13688,7 @@
           "module": "src/libgit2/tree.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_tree_walk",
@@ -13438,26 +13705,28 @@
               "home": "src/libgit2/src/libgit2/tree.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "9fa1335f735a9969d579bd8b0b0be3c1ff4a2d06"
+          ]
         }
       ]
     },
     {
-      "index": 642,
+      "index": 645,
       "link_unit": "libgit2",
       "module": "src/libgit2/commit.c",
       "foundational": false,
       "layer": 4,
       "sublayer": 1,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          524,
-          529,
-          558,
-          572,
-          598,
-          628
+          527,
+          532,
+          561,
+          575,
+          601,
+          631
         ],
         "cut": []
       },
@@ -13474,7 +13743,7 @@
           "module": "src/libgit2/commit.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_commit_header",
@@ -13487,7 +13756,9 @@
               "home": "src/libgit2/src/libgit2/commit.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "31f74f8e227d17e8b98390be5f5353d39940d166"
+          ]
         },
         {
           "index": 1,
@@ -13495,7 +13766,7 @@
           "module": "src/libgit2/commit.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_commitbuilder",
@@ -13505,7 +13776,9 @@
               "home": "src/libgit2/src/libgit2/commit.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "b7b4fa7a3b367f263ddc5ea7946d9afe29d08b41"
+          ]
         },
         {
           "index": 2,
@@ -13513,7 +13786,7 @@
           "module": "src/libgit2/commit.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_commit_create_from_ids",
@@ -13551,22 +13824,25 @@
               "home": "src/libgit2/src/libgit2/commit.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "fc73df8654805c0b637d2f1d3e1f5725e70fb342",
+            "1cb42ac562ace9df520426ac6d6b138cd0247a41"
+          ]
         }
       ]
     },
     {
-      "index": 643,
+      "index": 646,
       "link_unit": "libgit2",
       "module": "src/libgit2/index.c",
       "foundational": false,
       "layer": 4,
       "sublayer": 1,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          529,
-          573
+          532,
+          576
         ],
         "cut": []
       },
@@ -13583,7 +13859,7 @@
           "module": "src/libgit2/index.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_index_conflict_iterator",
@@ -13600,7 +13876,10 @@
               "home": "src/libgit2/src/libgit2/index.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "9bafcfd7f9f3f53e6e0040e2f5b32911ec793810",
+            "92a70edfd79013b0832e3154ddc8fdd4152850b5"
+          ]
         },
         {
           "index": 1,
@@ -13608,7 +13887,7 @@
           "module": "src/libgit2/index.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_index_name_entry",
@@ -13632,7 +13911,10 @@
               "home": "src/libgit2/src/libgit2/index.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "b2f5d96391615cd088f55eb688f241e8b18054f7",
+            "891c7bf476cd564ca5c28086e77cef797c8cc5e9"
+          ]
         },
         {
           "index": 2,
@@ -13640,7 +13922,7 @@
           "module": "src/libgit2/index.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_index_reuc_entry",
@@ -13664,7 +13946,10 @@
               "home": "src/libgit2/src/libgit2/index.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "a778521e9979112f371316d003f5a0e2378d1c2a",
+            "a93fc4530884851225b555eeef8342af992e422a"
+          ]
         },
         {
           "index": 3,
@@ -13672,7 +13957,7 @@
           "module": "src/libgit2/index.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_index_matched_path_cb",
@@ -13682,12 +13967,14 @@
               "home": "src/libgit2/src/libgit2/index.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "0e6b33287c3325b834bb38836392aa20e13f8490"
+          ]
         }
       ]
     },
     {
-      "index": 644,
+      "index": 647,
       "link_unit": "libgit2",
       "module": "src/libgit2/odb_mempack.c",
       "foundational": false,
@@ -13696,10 +13983,10 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          524,
-          558,
-          564,
-          623
+          527,
+          561,
+          567,
+          626
         ],
         "cut": []
       },
@@ -13759,7 +14046,7 @@
       ]
     },
     {
-      "index": 645,
+      "index": 648,
       "link_unit": "libgit2",
       "module": "src/libgit2/patch_generate.c",
       "foundational": false,
@@ -13768,10 +14055,10 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          578,
-          580,
-          596,
-          604
+          581,
+          583,
+          599,
+          607
         ],
         "cut": []
       },
@@ -13838,7 +14125,7 @@
       ]
     },
     {
-      "index": 646,
+      "index": 649,
       "link_unit": "libgit2",
       "module": "src/libgit2/remote.c",
       "foundational": false,
@@ -13847,9 +14134,9 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          529,
           532,
-          558
+          535,
+          561
         ],
         "cut": []
       },
@@ -14018,7 +14305,7 @@
       ]
     },
     {
-      "index": 647,
+      "index": 650,
       "link_unit": "libgit2",
       "module": "src/libgit2/revparse.c",
       "foundational": false,
@@ -14027,9 +14314,9 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          558,
-          569,
-          570
+          561,
+          572,
+          573
         ],
         "cut": []
       },
@@ -14090,7 +14377,7 @@
       ]
     },
     {
-      "index": 648,
+      "index": 651,
       "link_unit": "libgit2",
       "module": "src/libgit2/status.c",
       "foundational": false,
@@ -14099,10 +14386,10 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          532,
-          558,
+          535,
           561,
-          628
+          564,
+          631
         ],
         "cut": []
       },
@@ -14202,22 +14489,22 @@
       ]
     },
     {
-      "index": 649,
+      "index": 652,
       "link_unit": "libgit2",
       "module": "src/libgit2/checkout.c",
       "foundational": false,
       "layer": 5,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          532,
-          573,
-          628
+          535,
+          576,
+          631
         ],
         "cut": [
-          672,
-          685
+          675,
+          688
         ]
       },
       "budgets": {
@@ -14233,7 +14520,7 @@
           "module": "src/libgit2/checkout.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_checkout_options",
@@ -14264,7 +14551,10 @@
               "home": "src/libgit2/src/libgit2/checkout.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "97a5f1b7f444543b6bb5e882ad690af370e5b7a9",
+            "50789cf60c87f8610eff8457ea7e16abb0879ca0"
+          ]
         },
         {
           "index": 1,
@@ -14272,7 +14562,7 @@
           "module": "src/libgit2/checkout.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_checkout_perfdata",
@@ -14286,25 +14576,27 @@
               "home": "src/libgit2/src/libgit2/checkout.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "eda4ae102da48c98745c380bdec72575edc8e723"
+          ]
         }
       ]
     },
     {
-      "index": 650,
+      "index": 653,
       "link_unit": "libgit2",
       "module": "src/libgit2/worktree.c",
       "foundational": false,
       "layer": 4,
       "sublayer": 1,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          532,
-          558,
-          570,
-          575,
-          649
+          535,
+          561,
+          573,
+          578,
+          652
         ],
         "cut": []
       },
@@ -14321,7 +14613,7 @@
           "module": "src/libgit2/worktree.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_worktree_add_options",
@@ -14337,7 +14629,9 @@
               "home": "src/libgit2/src/libgit2/worktree.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "d71e213f3fde1e7b76326cbf0fc0de5569a57f9c"
+          ]
         },
         {
           "index": 1,
@@ -14345,7 +14639,7 @@
           "module": "src/libgit2/worktree.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_worktree_prune_options",
@@ -14358,7 +14652,9 @@
               "home": "src/libgit2/src/libgit2/worktree.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "23df0c42fcb4def063df56a607f0a1c332593ecf"
+          ]
         },
         {
           "index": 2,
@@ -14366,7 +14662,7 @@
           "module": "src/libgit2/worktree.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_worktree_list",
@@ -14376,12 +14672,14 @@
               "home": "src/libgit2/src/libgit2/worktree.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "f5ddbc6669d15cb11fdaf9e888c370b240fb5007"
+          ]
         }
       ]
     },
     {
-      "index": 651,
+      "index": 654,
       "link_unit": "libgit2",
       "module": "src/libgit2/annotated_commit.c",
       "foundational": false,
@@ -14390,10 +14688,10 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          529,
-          558,
-          570,
-          571
+          532,
+          561,
+          573,
+          574
         ],
         "cut": []
       },
@@ -14467,23 +14765,23 @@
       ]
     },
     {
-      "index": 652,
+      "index": 655,
       "link_unit": "libgit2",
       "module": "src/libgit2/commit.c",
       "foundational": false,
       "layer": 4,
       "sublayer": 2,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          524,
-          529,
-          558,
-          572,
-          598,
-          622,
-          628,
-          642
+          527,
+          532,
+          561,
+          575,
+          601,
+          625,
+          631,
+          645
         ],
         "cut": []
       },
@@ -14500,7 +14798,7 @@
           "module": "src/libgit2/commit.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_commit_amend",
@@ -14678,7 +14976,11 @@
               "home": "src/libgit2/src/libgit2/commit.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "fc73df8654805c0b637d2f1d3e1f5725e70fb342",
+            "f98dbf383092b22fa405e3a55798e5ba0e138625",
+            "1cb42ac562ace9df520426ac6d6b138cd0247a41"
+          ]
         },
         {
           "index": 1,
@@ -14686,7 +14988,7 @@
           "module": "src/libgit2/commit.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_commitbuilder_add_header",
@@ -14696,27 +14998,29 @@
               "home": "src/libgit2/src/libgit2/commit.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "fc73df8654805c0b637d2f1d3e1f5725e70fb342"
+          ]
         }
       ]
     },
     {
-      "index": 653,
+      "index": 656,
       "link_unit": "libgit2",
       "module": "src/libgit2/index.c",
       "foundational": false,
       "layer": 4,
       "sublayer": 2,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          524,
-          529,
+          527,
           532,
-          558,
-          573,
-          628,
-          643
+          535,
+          561,
+          576,
+          631,
+          646
         ],
         "cut": []
       },
@@ -14733,7 +15037,7 @@
           "module": "src/libgit2/index.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_index_entry",
@@ -14756,7 +15060,9 @@
               "home": "src/libgit2/src/libgit2/index.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "891c7bf476cd564ca5c28086e77cef797c8cc5e9"
+          ]
         },
         {
           "index": 1,
@@ -14764,7 +15070,7 @@
           "module": "src/libgit2/index.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_index_add_all",
@@ -14942,7 +15248,10 @@
               "home": "src/libgit2/src/libgit2/index.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "c97a0ec512120965404b5c31a1c274a93eefb2df",
+            "ce6ab4f5ac298f27643e108b5631814fe97e06e2"
+          ]
         },
         {
           "index": 2,
@@ -14950,7 +15259,7 @@
           "module": "src/libgit2/index.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_index_open_ext",
@@ -15121,12 +15430,16 @@
               "home": "src/libgit2/src/libgit2/index.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "f65cb80939a4431534aa4fa49a260913b3467ca3",
+            "c97a0ec512120965404b5c31a1c274a93eefb2df",
+            "ce6ab4f5ac298f27643e108b5631814fe97e06e2"
+          ]
         }
       ]
     },
     {
-      "index": 654,
+      "index": 657,
       "link_unit": "libgit2",
       "module": "src/libgit2/refdb.c",
       "foundational": false,
@@ -15135,9 +15448,9 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          558,
-          574,
-          625
+          561,
+          577,
+          628
         ],
         "cut": []
       },
@@ -15190,7 +15503,7 @@
       ]
     },
     {
-      "index": 655,
+      "index": 658,
       "link_unit": "libgit2",
       "module": "src/libgit2/remote.c",
       "foundational": false,
@@ -15199,12 +15512,12 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          524,
-          526,
-          532,
-          557,
-          558,
-          646
+          527,
+          529,
+          535,
+          560,
+          561,
+          649
         ],
         "cut": []
       },
@@ -15450,7 +15763,7 @@
       ]
     },
     {
-      "index": 656,
+      "index": 659,
       "link_unit": "libgit2",
       "module": "src/libgit2/revparse.c",
       "foundational": false,
@@ -15459,8 +15772,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          558,
-          647
+          561,
+          650
         ],
         "cut": []
       },
@@ -15492,7 +15805,7 @@
       ]
     },
     {
-      "index": 657,
+      "index": 660,
       "link_unit": "libgit2",
       "module": "src/libgit2/status.c",
       "foundational": false,
@@ -15501,9 +15814,9 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          550,
-          558,
-          648
+          553,
+          561,
+          651
         ],
         "cut": []
       },
@@ -15584,7 +15897,7 @@
       ]
     },
     {
-      "index": 658,
+      "index": 661,
       "link_unit": "libgit2",
       "module": "src/libgit2/transaction.c",
       "foundational": false,
@@ -15593,11 +15906,11 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          529,
-          558,
-          598,
-          600,
-          624
+          532,
+          561,
+          601,
+          603,
+          627
         ],
         "cut": []
       },
@@ -15678,19 +15991,19 @@
       ]
     },
     {
-      "index": 659,
+      "index": 662,
       "link_unit": "libgit2",
       "module": "src/libgit2/worktree.c",
       "foundational": false,
       "layer": 4,
       "sublayer": 2,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          524,
-          558,
-          575,
-          650
+          527,
+          561,
+          578,
+          653
         ],
         "cut": []
       },
@@ -15707,7 +16020,7 @@
           "module": "src/libgit2/worktree.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_worktree_add",
@@ -15808,24 +16121,27 @@
               "home": "src/libgit2/src/libgit2/worktree.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "f5ddbc6669d15cb11fdaf9e888c370b240fb5007",
+            "b78596a8f03aa8b96e771c938adff48b283b5987"
+          ]
         }
       ]
     },
     {
-      "index": 660,
+      "index": 663,
       "link_unit": "libgit2",
       "module": "src/libgit2/commit.c",
       "foundational": false,
       "layer": 4,
       "sublayer": 3,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          572,
-          598,
-          642,
-          652
+          575,
+          601,
+          645,
+          655
         ],
         "cut": []
       },
@@ -15842,7 +16158,7 @@
           "module": "src/libgit2/commit.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_commit_create_ext_options",
@@ -15877,7 +16193,10 @@
               "home": "src/libgit2/src/libgit2/commit.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "452c409b27745f7a435d44c2f1a599756e929fd3",
+            "20848d98dab40c96654fe1bfe3b523242f0f37e6"
+          ]
         },
         {
           "index": 1,
@@ -15885,7 +16204,7 @@
           "module": "src/libgit2/commit.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_commitarray_dispose",
@@ -15895,23 +16214,25 @@
               "home": "src/libgit2/src/libgit2/commit.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "1a9b0e5483dcd8a1e144abe64d0ad89cd764844d"
+          ]
         }
       ]
     },
     {
-      "index": 661,
+      "index": 664,
       "link_unit": "libgit2",
       "module": "src/libgit2/index.c",
       "foundational": false,
       "layer": 4,
       "sublayer": 3,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          573,
-          643,
-          653
+          576,
+          646,
+          656
         ],
         "cut": []
       },
@@ -15928,7 +16249,7 @@
           "module": "src/libgit2/index.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_index_add",
@@ -16001,12 +16322,14 @@
               "home": "src/libgit2/src/libgit2/index.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "ce6ab4f5ac298f27643e108b5631814fe97e06e2"
+          ]
         }
       ]
     },
     {
-      "index": 662,
+      "index": 665,
       "link_unit": "libgit2",
       "module": "src/libgit2/refdb.c",
       "foundational": false,
@@ -16015,12 +16338,12 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          529,
-          570,
-          598,
-          624,
-          625,
-          654
+          532,
+          573,
+          601,
+          627,
+          628,
+          657
         ],
         "cut": []
       },
@@ -16071,7 +16394,7 @@
       ]
     },
     {
-      "index": 663,
+      "index": 666,
       "link_unit": "libgit2",
       "module": "src/libgit2/push.c",
       "foundational": false,
@@ -16110,7 +16433,7 @@
       ]
     },
     {
-      "index": 664,
+      "index": 667,
       "link_unit": "libgit2",
       "module": "src/libgit2/transport.c",
       "foundational": false,
@@ -16119,15 +16442,15 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          526,
           529,
-          554,
-          558,
-          646,
-          663
+          532,
+          557,
+          561,
+          649,
+          666
         ],
         "cut": [
-          668
+          671
         ]
       },
       "budgets": {
@@ -16211,7 +16534,7 @@
       ]
     },
     {
-      "index": 665,
+      "index": 668,
       "link_unit": "libgit2",
       "module": "src/libgit2/remote.c",
       "foundational": false,
@@ -16220,15 +16543,15 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          529,
-          540,
-          544,
-          555,
-          557,
-          623,
-          646,
-          655,
-          664
+          532,
+          543,
+          547,
+          558,
+          560,
+          626,
+          649,
+          658,
+          667
         ],
         "cut": []
       },
@@ -16277,21 +16600,21 @@
       ]
     },
     {
-      "index": 666,
+      "index": 669,
       "link_unit": "libgit2",
       "module": "src/libgit2/commit.c",
       "foundational": false,
       "layer": 4,
       "sublayer": 4,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          529,
-          558,
-          572,
-          598,
-          628,
-          660
+          532,
+          561,
+          575,
+          601,
+          631,
+          663
         ],
         "cut": []
       },
@@ -16308,7 +16631,7 @@
           "module": "src/libgit2/commit.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_commit_amend_from_stage",
@@ -16360,12 +16683,15 @@
               "home": "src/libgit2/src/libgit2/commit.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "1cb42ac562ace9df520426ac6d6b138cd0247a41",
+            "1a9b0e5483dcd8a1e144abe64d0ad89cd764844d"
+          ]
         }
       ]
     },
     {
-      "index": 667,
+      "index": 670,
       "link_unit": "libgit2",
       "module": "src/libgit2/refdb.c",
       "foundational": false,
@@ -16374,8 +16700,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          574,
-          662
+          577,
+          665
         ],
         "cut": []
       },
@@ -16414,7 +16740,7 @@
       ]
     },
     {
-      "index": 668,
+      "index": 671,
       "link_unit": "libgit2",
       "module": "src/libgit2/remote.c",
       "foundational": false,
@@ -16423,10 +16749,10 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          532,
-          556,
-          646,
-          665
+          535,
+          559,
+          649,
+          668
         ],
         "cut": []
       },
@@ -16546,7 +16872,7 @@
       ]
     },
     {
-      "index": 669,
+      "index": 672,
       "link_unit": "libgit2",
       "module": "src/libgit2/remote.c",
       "foundational": false,
@@ -16555,9 +16881,9 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          532,
-          646,
-          668
+          535,
+          649,
+          671
         ],
         "cut": []
       },
@@ -16631,7 +16957,7 @@
       ]
     },
     {
-      "index": 670,
+      "index": 673,
       "link_unit": "libgit2",
       "module": "src/libgit2/apply.c",
       "foundational": false,
@@ -16640,8 +16966,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          550,
-          561
+          553,
+          564
         ],
         "cut": []
       },
@@ -16680,7 +17006,7 @@
       ]
     },
     {
-      "index": 671,
+      "index": 674,
       "link_unit": "libgit2",
       "module": "src/libgit2/branch.c",
       "foundational": false,
@@ -16689,11 +17015,11 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          524,
-          558,
-          570,
-          571,
-          572
+          527,
+          561,
+          573,
+          574,
+          575
         ],
         "cut": []
       },
@@ -16841,17 +17167,17 @@
       ]
     },
     {
-      "index": 672,
+      "index": 675,
       "link_unit": "libgit2",
       "module": "src/libgit2/checkout.c",
       "foundational": false,
       "layer": 5,
       "sublayer": 1,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          550,
-          649
+          553,
+          652
         ],
         "cut": []
       },
@@ -16868,7 +17194,7 @@
           "module": "src/libgit2/checkout.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_checkout_notify_cb",
@@ -16885,12 +17211,15 @@
               "home": "src/libgit2/src/libgit2/checkout.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "3b654f0974777080db1353321cc65669dc55bcd4",
+            "b694c36538868d68e79be67d20297edfcf52b893"
+          ]
         }
       ]
     },
     {
-      "index": 673,
+      "index": 676,
       "link_unit": "libgit2",
       "module": "src/libgit2/diff_generate.c",
       "foundational": false,
@@ -16899,11 +17228,11 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          550,
-          558,
-          573,
-          580,
-          628
+          553,
+          561,
+          576,
+          583,
+          631
         ],
         "cut": []
       },
@@ -16970,7 +17299,7 @@
       ]
     },
     {
-      "index": 674,
+      "index": 677,
       "link_unit": "libgit2",
       "module": "src/libgit2/email.c",
       "foundational": false,
@@ -16979,8 +17308,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          578,
-          580
+          581,
+          583
         ],
         "cut": []
       },
@@ -17020,7 +17349,7 @@
       ]
     },
     {
-      "index": 675,
+      "index": 678,
       "link_unit": "libgit2",
       "module": "src/libgit2/fetch.c",
       "foundational": false,
@@ -17029,7 +17358,7 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          668
+          671
         ],
         "cut": []
       },
@@ -17061,7 +17390,7 @@
       ]
     },
     {
-      "index": 676,
+      "index": 679,
       "link_unit": "libgit2",
       "module": "src/libgit2/notes.c",
       "foundational": false,
@@ -17070,12 +17399,12 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          524,
           527,
-          529,
-          558,
-          572,
-          598
+          530,
+          532,
+          561,
+          575,
+          601
         ],
         "cut": []
       },
@@ -17188,21 +17517,21 @@
       ]
     },
     {
-      "index": 677,
+      "index": 680,
       "link_unit": "libgit2",
       "module": "src/libgit2/object_api.c",
       "foundational": false,
       "layer": 5,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          529,
-          558,
-          572,
-          604,
-          627,
-          628
+          532,
+          561,
+          575,
+          607,
+          630,
+          631
         ],
         "cut": []
       },
@@ -17219,7 +17548,7 @@
           "module": "src/libgit2/object_api.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_blob_dup",
@@ -17390,21 +17719,26 @@
               "home": "src/libgit2/src/libgit2/object_api.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "9fa1335f735a9969d579bd8b0b0be3c1ff4a2d06",
+            "f98dbf383092b22fa405e3a55798e5ba0e138625",
+            "639d7dc658062babb0e00e0d9124838e50160c8e",
+            "1cb42ac562ace9df520426ac6d6b138cd0247a41"
+          ]
         }
       ]
     },
     {
-      "index": 678,
+      "index": 681,
       "link_unit": "libgit2",
       "module": "src/libgit2/pathspec.c",
       "foundational": false,
       "layer": 5,
       "sublayer": 1,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          610
+          613
         ],
         "cut": []
       },
@@ -17421,7 +17755,7 @@
           "module": "src/libgit2/pathspec.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_pathspec_match_list",
@@ -17431,12 +17765,14 @@
               "home": "src/libgit2/src/libgit2/pathspec.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "650fbd8da6fc9b898f95e247888a955ed656285c"
+          ]
         }
       ]
     },
     {
-      "index": 679,
+      "index": 682,
       "link_unit": "libgit2",
       "module": "src/libgit2/push.c",
       "foundational": false,
@@ -17445,8 +17781,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          663,
-          668
+          666,
+          671
         ],
         "cut": []
       },
@@ -17478,7 +17814,7 @@
       ]
     },
     {
-      "index": 680,
+      "index": 683,
       "link_unit": "libgit2",
       "module": "src/libgit2/refdb_fs.c",
       "foundational": false,
@@ -17487,8 +17823,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          558,
-          662
+          561,
+          665
         ],
         "cut": []
       },
@@ -17520,7 +17856,7 @@
       ]
     },
     {
-      "index": 681,
+      "index": 684,
       "link_unit": "libgit2",
       "module": "src/libgit2/refdb_reftable.c",
       "foundational": false,
@@ -17529,8 +17865,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          558,
-          662
+          561,
+          665
         ],
         "cut": []
       },
@@ -17562,7 +17898,7 @@
       ]
     },
     {
-      "index": 682,
+      "index": 685,
       "link_unit": "libgit2",
       "module": "src/libgit2/transport.c",
       "foundational": false,
@@ -17571,10 +17907,10 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          664
+          667
         ],
         "cut": [
-          689
+          692
         ]
       },
       "budgets": {
@@ -17627,7 +17963,7 @@
       ]
     },
     {
-      "index": 683,
+      "index": 686,
       "link_unit": "libgit2",
       "module": "src/libgit2/apply.c",
       "foundational": false,
@@ -17636,7 +17972,7 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          670
+          673
         ],
         "cut": []
       },
@@ -17674,7 +18010,7 @@
       ]
     },
     {
-      "index": 684,
+      "index": 687,
       "link_unit": "libgit2",
       "module": "src/libgit2/branch.c",
       "foundational": false,
@@ -17683,9 +18019,9 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          558,
-          570,
-          671
+          561,
+          573,
+          674
         ],
         "cut": []
       },
@@ -17731,17 +18067,17 @@
       ]
     },
     {
-      "index": 685,
+      "index": 688,
       "link_unit": "libgit2",
       "module": "src/libgit2/checkout.c",
       "foundational": false,
       "layer": 5,
       "sublayer": 2,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          649,
-          672
+          652,
+          675
         ],
         "cut": []
       },
@@ -17758,7 +18094,7 @@
           "module": "src/libgit2/checkout.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_checkout_perfdata_cb",
@@ -17768,12 +18104,14 @@
               "home": "src/libgit2/src/libgit2/checkout.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "b694c36538868d68e79be67d20297edfcf52b893"
+          ]
         }
       ]
     },
     {
-      "index": 686,
+      "index": 689,
       "link_unit": "libgit2",
       "module": "src/libgit2/email.c",
       "foundational": false,
@@ -17782,12 +18120,12 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          524,
-          529,
-          550,
-          572,
-          598,
-          674
+          527,
+          532,
+          553,
+          575,
+          601,
+          677
         ],
         "cut": []
       },
@@ -17833,7 +18171,7 @@
       ]
     },
     {
-      "index": 687,
+      "index": 690,
       "link_unit": "libgit2",
       "module": "src/libgit2/notes.c",
       "foundational": false,
@@ -17842,11 +18180,11 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          529,
-          558,
-          572,
-          598,
-          676
+          532,
+          561,
+          575,
+          601,
+          679
         ],
         "cut": []
       },
@@ -17927,23 +18265,23 @@
       ]
     },
     {
-      "index": 688,
+      "index": 691,
       "link_unit": "libgit2",
       "module": "src/libgit2/pathspec.c",
       "foundational": false,
       "layer": 5,
       "sublayer": 2,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
-          532,
-          550,
-          558,
+          535,
+          553,
           561,
-          573,
-          610,
-          628,
-          678
+          564,
+          576,
+          613,
+          631,
+          681
         ],
         "cut": []
       },
@@ -17960,7 +18298,7 @@
           "module": "src/libgit2/pathspec.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_pathspec_free",
@@ -18054,12 +18392,16 @@
               "home": "src/libgit2/src/libgit2/pathspec.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "40bbeed36f4453f267cee65e61bb80165943fb65",
+            "f65cb80939a4431534aa4fa49a260913b3467ca3",
+            "ce6ab4f5ac298f27643e108b5631814fe97e06e2"
+          ]
         }
       ]
     },
     {
-      "index": 689,
+      "index": 692,
       "link_unit": "libgit2",
       "module": "src/libgit2/transport.c",
       "foundational": false,
@@ -18068,7 +18410,7 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          682
+          685
         ],
         "cut": []
       },
@@ -18105,7 +18447,7 @@
       ]
     },
     {
-      "index": 690,
+      "index": 693,
       "link_unit": "libgit2",
       "module": "src/libgit2/apply.c",
       "foundational": false,
@@ -18114,11 +18456,11 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          550,
-          558,
-          573,
-          628,
-          683
+          553,
+          561,
+          576,
+          631,
+          686
         ],
         "cut": []
       },
@@ -18164,7 +18506,7 @@
       ]
     },
     {
-      "index": 691,
+      "index": 694,
       "link_unit": "libgit2",
       "module": "src/libgit2/transport.c",
       "foundational": false,
@@ -18173,10 +18515,10 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          646,
-          664,
-          682,
-          689
+          649,
+          667,
+          685,
+          692
         ],
         "cut": []
       },
@@ -18222,7 +18564,7 @@
       ]
     },
     {
-      "index": 692,
+      "index": 695,
       "link_unit": "libgit2",
       "module": "src/libgit2/checkout.c",
       "foundational": false,
@@ -18231,11 +18573,11 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          558,
-          569,
-          573,
-          649,
-          685
+          561,
+          572,
+          576,
+          652,
+          688
         ],
         "cut": []
       },
@@ -18288,7 +18630,7 @@
       ]
     },
     {
-      "index": 693,
+      "index": 696,
       "link_unit": "libgit2",
       "module": "src/libgit2/transport.c",
       "foundational": false,
@@ -18297,8 +18639,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          664,
-          691
+          667,
+          694
         ],
         "cut": []
       },
@@ -18352,7 +18694,7 @@
       ]
     },
     {
-      "index": 694,
+      "index": 697,
       "link_unit": "libgit2",
       "module": "src/libgit2/clone.c",
       "foundational": false,
@@ -18361,8 +18703,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          558,
-          646
+          561,
+          649
         ],
         "cut": []
       },
@@ -18401,7 +18743,7 @@
       ]
     },
     {
-      "index": 695,
+      "index": 698,
       "link_unit": "libgit2",
       "module": "src/libgit2/merge.c",
       "foundational": false,
@@ -18410,15 +18752,15 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          529,
-          554,
-          558,
+          532,
+          557,
           561,
-          570,
-          571
+          564,
+          573,
+          574
         ],
         "cut": [
-          706
+          709
         ]
       },
       "budgets": {
@@ -18601,7 +18943,7 @@
       ]
     },
     {
-      "index": 696,
+      "index": 699,
       "link_unit": "libgit2",
       "module": "src/libgit2/reset.c",
       "foundational": false,
@@ -18610,11 +18952,11 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          532,
-          558,
-          569,
-          571,
-          649
+          535,
+          561,
+          572,
+          574,
+          652
         ],
         "cut": []
       },
@@ -18660,7 +19002,7 @@
       ]
     },
     {
-      "index": 697,
+      "index": 700,
       "link_unit": "libgit2",
       "module": "src/libgit2/stash.c",
       "foundational": false,
@@ -18669,10 +19011,10 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          529,
           532,
-          558,
-          598
+          535,
+          561,
+          601
         ],
         "cut": []
       },
@@ -18749,7 +19091,7 @@
       ]
     },
     {
-      "index": 698,
+      "index": 701,
       "link_unit": "libgit2",
       "module": "src/libgit2/submodule.c",
       "foundational": false,
@@ -18758,10 +19100,10 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          524,
-          558,
-          649,
-          668
+          527,
+          561,
+          652,
+          671
         ],
         "cut": []
       },
@@ -18865,7 +19207,7 @@
       ]
     },
     {
-      "index": 699,
+      "index": 702,
       "link_unit": "libgit2",
       "module": "src/libgit2/transports/git.c",
       "foundational": false,
@@ -18874,8 +19216,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          664,
-          682
+          667,
+          685
         ],
         "cut": []
       },
@@ -18907,7 +19249,7 @@
       ]
     },
     {
-      "index": 700,
+      "index": 703,
       "link_unit": "libgit2",
       "module": "src/libgit2/transports/http.c",
       "foundational": false,
@@ -18916,8 +19258,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          664,
-          682
+          667,
+          685
         ],
         "cut": []
       },
@@ -18949,7 +19291,7 @@
       ]
     },
     {
-      "index": 701,
+      "index": 704,
       "link_unit": "libgit2",
       "module": "src/libgit2/transports/local.c",
       "foundational": false,
@@ -18958,8 +19300,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          646,
-          664
+          649,
+          667
         ],
         "cut": []
       },
@@ -18991,7 +19333,7 @@
       ]
     },
     {
-      "index": 702,
+      "index": 705,
       "link_unit": "libgit2",
       "module": "src/libgit2/transports/smart.c",
       "foundational": false,
@@ -19000,12 +19342,12 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          535,
-          555,
-          646,
-          664,
-          668,
-          693
+          538,
+          558,
+          649,
+          667,
+          671,
+          696
         ],
         "cut": []
       },
@@ -19051,7 +19393,7 @@
       ]
     },
     {
-      "index": 703,
+      "index": 706,
       "link_unit": "libgit2",
       "module": "src/libgit2/transports/ssh.c",
       "foundational": false,
@@ -19060,10 +19402,10 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          532,
-          646,
-          664,
-          682
+          535,
+          649,
+          667,
+          685
         ],
         "cut": []
       },
@@ -19102,7 +19444,7 @@
       ]
     },
     {
-      "index": 704,
+      "index": 707,
       "link_unit": "libgit2",
       "module": "src/libgit2/clone.c",
       "foundational": false,
@@ -19111,9 +19453,9 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          649,
-          668,
-          694
+          652,
+          671,
+          697
         ],
         "cut": []
       },
@@ -19156,7 +19498,7 @@
       ]
     },
     {
-      "index": 705,
+      "index": 708,
       "link_unit": "libgit2",
       "module": "src/libgit2/merge_driver.c",
       "foundational": false,
@@ -19195,7 +19537,7 @@
       ]
     },
     {
-      "index": 706,
+      "index": 709,
       "link_unit": "libgit2",
       "module": "src/libgit2/merge.c",
       "foundational": false,
@@ -19204,15 +19546,15 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          524,
-          558,
-          571,
-          572,
-          573,
-          628,
-          649,
-          695,
-          705
+          527,
+          561,
+          574,
+          575,
+          576,
+          631,
+          652,
+          698,
+          708
         ],
         "cut": []
       },
@@ -19300,7 +19642,7 @@
       ]
     },
     {
-      "index": 707,
+      "index": 710,
       "link_unit": "libgit2",
       "module": "src/libgit2/stash.c",
       "foundational": false,
@@ -19309,10 +19651,10 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          529,
-          558,
-          649,
-          697
+          532,
+          561,
+          652,
+          700
         ],
         "cut": []
       },
@@ -19382,7 +19724,7 @@
       ]
     },
     {
-      "index": 708,
+      "index": 711,
       "link_unit": "libgit2",
       "module": "src/libgit2/submodule.c",
       "foundational": false,
@@ -19391,9 +19733,9 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          529,
-          558,
-          698
+          532,
+          561,
+          701
         ],
         "cut": []
       },
@@ -19618,7 +19960,7 @@
       ]
     },
     {
-      "index": 709,
+      "index": 712,
       "link_unit": "libgit2",
       "module": "src/libgit2/transports/smart.c",
       "foundational": false,
@@ -19627,9 +19969,9 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          555,
-          664,
-          702
+          558,
+          667,
+          705
         ],
         "cut": []
       },
@@ -19661,7 +20003,7 @@
       ]
     },
     {
-      "index": 710,
+      "index": 713,
       "link_unit": "libgit2",
       "module": "src/libgit2/clone.c",
       "foundational": false,
@@ -19670,8 +20012,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          558,
-          704
+          561,
+          707
         ],
         "cut": []
       },
@@ -19710,7 +20052,7 @@
       ]
     },
     {
-      "index": 711,
+      "index": 714,
       "link_unit": "libgit2",
       "module": "src/libgit2/stash.c",
       "foundational": false,
@@ -19719,8 +20061,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          558,
-          707
+          561,
+          710
         ],
         "cut": []
       },
@@ -19766,7 +20108,7 @@
       ]
     },
     {
-      "index": 712,
+      "index": 715,
       "link_unit": "libgit2",
       "module": "src/libgit2/submodule.c",
       "foundational": false,
@@ -19775,8 +20117,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          558,
-          708
+          561,
+          711
         ],
         "cut": []
       },
@@ -19808,7 +20150,7 @@
       ]
     },
     {
-      "index": 713,
+      "index": 716,
       "link_unit": "libgit2",
       "module": "src/libgit2/cherrypick.c",
       "foundational": false,
@@ -19817,11 +20159,11 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          558,
-          572,
-          573,
-          649,
-          695
+          561,
+          575,
+          576,
+          652,
+          698
         ],
         "cut": []
       },
@@ -19876,7 +20218,7 @@
       ]
     },
     {
-      "index": 714,
+      "index": 717,
       "link_unit": "libgit2",
       "module": "src/libgit2/merge_driver.c",
       "foundational": false,
@@ -19885,8 +20227,8 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          695,
-          705
+          698,
+          708
         ],
         "cut": []
       },
@@ -19932,7 +20274,7 @@
       ]
     },
     {
-      "index": 715,
+      "index": 718,
       "link_unit": "libgit2",
       "module": "src/libgit2/merge_file.c",
       "foundational": false,
@@ -19941,9 +20283,9 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          558,
-          653,
-          695
+          561,
+          656,
+          698
         ],
         "cut": []
       },
@@ -19989,7 +20331,7 @@
       ]
     },
     {
-      "index": 716,
+      "index": 719,
       "link_unit": "libgit2",
       "module": "src/libgit2/rebase.c",
       "foundational": false,
@@ -19998,11 +20340,11 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          524,
-          529,
-          649,
+          527,
+          532,
           652,
-          695
+          655,
+          698
         ],
         "cut": []
       },
@@ -20073,7 +20415,7 @@
       ]
     },
     {
-      "index": 717,
+      "index": 720,
       "link_unit": "libgit2",
       "module": "src/libgit2/revert.c",
       "foundational": false,
@@ -20082,11 +20424,11 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          558,
-          572,
-          573,
-          649,
-          695
+          561,
+          575,
+          576,
+          652,
+          698
         ],
         "cut": []
       },
@@ -20141,7 +20483,7 @@
       ]
     },
     {
-      "index": 718,
+      "index": 721,
       "link_unit": "libgit2",
       "module": "src/libgit2/stream.h",
       "foundational": false,
@@ -20151,7 +20493,7 @@
       "depends_on": {
         "scheduled": [],
         "cut": [
-          725
+          728
         ]
       },
       "budgets": {
@@ -20195,7 +20537,7 @@
       ]
     },
     {
-      "index": 719,
+      "index": 722,
       "link_unit": "libgit2",
       "module": "src/libgit2/streams/openssl.c",
       "foundational": false,
@@ -20204,7 +20546,7 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          555
+          558
         ],
         "cut": []
       },
@@ -20258,7 +20600,7 @@
       ]
     },
     {
-      "index": 720,
+      "index": 723,
       "link_unit": "libgit2",
       "module": "src/libgit2/transports/ssh_libssh2.c",
       "foundational": false,
@@ -20267,7 +20609,7 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          555
+          558
         ],
         "cut": []
       },
@@ -20308,7 +20650,7 @@
       ]
     },
     {
-      "index": 721,
+      "index": 724,
       "link_unit": "libgit2",
       "module": "src/libgit2/cherrypick.c",
       "foundational": false,
@@ -20317,9 +20659,9 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          558,
-          572,
-          713
+          561,
+          575,
+          716
         ],
         "cut": []
       },
@@ -20358,7 +20700,7 @@
       ]
     },
     {
-      "index": 722,
+      "index": 725,
       "link_unit": "libgit2",
       "module": "src/libgit2/merge_driver.c",
       "foundational": false,
@@ -20367,11 +20709,11 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          558,
-          653,
-          695,
-          705,
-          714
+          561,
+          656,
+          698,
+          708,
+          717
         ],
         "cut": []
       },
@@ -20431,7 +20773,7 @@
       ]
     },
     {
-      "index": 723,
+      "index": 726,
       "link_unit": "libgit2",
       "module": "src/libgit2/rebase.c",
       "foundational": false,
@@ -20440,12 +20782,12 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          529,
-          558,
-          571,
-          573,
-          598,
-          716
+          532,
+          561,
+          574,
+          576,
+          601,
+          719
         ],
         "cut": []
       },
@@ -20582,7 +20924,7 @@
       ]
     },
     {
-      "index": 724,
+      "index": 727,
       "link_unit": "libgit2",
       "module": "src/libgit2/revert.c",
       "foundational": false,
@@ -20591,9 +20933,9 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          558,
-          572,
-          717
+          561,
+          575,
+          720
         ],
         "cut": []
       },
@@ -20632,7 +20974,7 @@
       ]
     },
     {
-      "index": 725,
+      "index": 728,
       "link_unit": "libgit2",
       "module": "src/libgit2/stream.h",
       "foundational": false,
@@ -20641,9 +20983,9 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          555,
-          556,
-          718
+          558,
+          559,
+          721
         ],
         "cut": []
       },
@@ -20717,7 +21059,7 @@
       ]
     },
     {
-      "index": 726,
+      "index": 729,
       "link_unit": "libgit2",
       "module": "src/libgit2/streams/registry.c",
       "foundational": false,
@@ -20726,7 +21068,7 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          718
+          721
         ],
         "cut": []
       },
@@ -20762,7 +21104,7 @@
       ]
     },
     {
-      "index": 727,
+      "index": 730,
       "link_unit": "libgit2",
       "module": "src/libgit2/streams/registry.c",
       "foundational": false,
@@ -20771,7 +21113,7 @@
       "status": "todo",
       "depends_on": {
         "scheduled": [
-          726
+          729
         ],
         "cut": []
       },

@@ -9,12 +9,12 @@
       "home": "crustify/rust/libgit2/libgit2/core/trace.rs"
     }
   ],
-  "wave": 18,
+  "wave": 536,
   "batch": 0,
   "link_unit": "libgit2",
-  "module": null,
+  "module": "src/libgit2/trace.c",
   "foundational": false,
-  "base_branch": "crustify/waves/wave-18",
+  "base_branch": "crustify/waves/wave-536",
   "model": "openrouter/anthropic/claude-opus-5.5",
   "billing": "api"
 }

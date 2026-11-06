@@ -9,12 +9,12 @@
       "home": "src/libgit2/src/libgit2/indexer.rs"
     }
   ],
-  "wave": 178,
+  "wave": 543,
   "batch": 0,
   "link_unit": "libgit2",
   "module": "src/libgit2/indexer.c",
   "foundational": false,
-  "base_branch": "crustify/waves/wave-178",
+  "base_branch": "crustify/waves/wave-543",
   "model": "openrouter/anthropic/claude-opus-5.5",
   "billing": "api",
   "instructions": "instructions.md"

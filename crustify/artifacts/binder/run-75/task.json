@@ -23,12 +23,12 @@
       "home": "crustify/rust/libgit2/libgit2/config/sys/config.rs"
     }
   ],
-  "wave": 44,
-  "batch": 0,
+  "wave": 617,
+  "batch": 1,
   "link_unit": "libgit2",
-  "module": null,
+  "module": "src/libgit2/config.c",
   "foundational": false,
-  "base_branch": "crustify/waves/wave-44",
+  "base_branch": "crustify/waves/wave-617",
   "model": "openrouter/openai/gpt-6.1-sol",
   "billing": "api"
 }
