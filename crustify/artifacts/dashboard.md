@@ -126,7 +126,8 @@ the corrections it made to what earlier runs committed.
 |---|---:|---:|---|---:|---|---|---|
 | 1 | `12` | `167` | `configs/wavefront-config.json`, `configs/libgit2/*/wavefront-config.json` (22), `t3/chased_casts.csv`, `t3/type_generators.csv` | `8` | `$13.36` | `37.11M` | `32m23s` |
 | 2 | `196` | `1144` | `configs/wavefront-config.json`, `configs/libgit2/*/wavefront-config.json` (196, replacing 22), `t3/chased_casts.csv`, `ownership-store.json` | `1` | `$19.65` | `54.17M` | `53m48s` |
-| **Σ** | **`208`** | **`1311`** | | **`9`** | **`$33.01`** | **`91.28M`** | **`86m11s`** |
+| 3 | `196` | `1144` | `configs/wavefront-config.json`, `configs/libgit2/*/wavefront-config.json` (196, removed: one configuration with `modules` replaces them) | `1` | — | — | — |
+| **Σ** | **`404`** | **`2455`** | | **`10`** | **`$33.01`** | **`91.28M`** | **`86m11s`** |
 
 ## Side campaigns
 

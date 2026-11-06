@@ -1,466 +1,4362 @@
 {
   "_comment": [
-    "Campaign-wide wavefront inventory of the libgit2 wrap campaign: the libgit2.so link unit. Its impl_files and api_headers are the union of every module's configuration under configs/libgit2/<module index>/, so it owns everything and sets no items lists; binders, translators and reviewers resolve their queries through it, and its graph orders the modules and relates them. Paths are below the C root, c/, wavefront's repo_root. The TUs of libgit2.so's link line that the configured build compiles empty (src/libgit2/streams/openssl_dynamic.c, openssl_legacy.c, schannel.c, stransport.c, src/libgit2/transports/auth_gssapi.c, auth_sspi.c, ssh_exec.c, winhttp.c) are configured out, as are the deprecated shims deprecated.h, cred_helpers.h and sys/cred.h and the MSVC-only stdint.h; headers that define only macros belong to no module."
+    "The libgit2 wrap campaign's wavefront configuration, the only one: every query of the bindings and reviews resolves through it, and it orders and schedules the modules. Paths are below the C root, c/, wavefront's repo_root.",
+    "closure: the files of every module of crustify/artifacts/modules.json, impl_files its translation units and internal headers, api_headers the installed headers libgit2.so publishes. The TUs the configured build compiles empty (src/libgit2/streams/openssl_dynamic.c, openssl_legacy.c, schannel.c, stransport.c, src/libgit2/transports/auth_gssapi.c, auth_sspi.c, ssh_exec.c, winhttp.c) are configured out, as are the deprecated shims deprecated.h, cred_helpers.h and sys/cred.h and the MSVC-only stdint.h.",
+    "modules: one record per module of modules.json, named <link-unit>/<name>, with ' (foundational)' after a foundational module's name; its files are the module's file entries with their items, as {name, kind}, each item an entity its file is home to (a typedef follows the tag it names, so a shared header's typedef of a struct another file defines is claimed there). Macros are listed by none.",
+    "schedule_seeds: the files of the modules planner run 3 plans, every module of the campaign, so that the out-of-scope entities no module owns (deprecated items, and declarations the configured build never defines, which modules.json's file entries exclude) are not seeded."
   ],
   "state_dir": "../crustify/wavefront",
-  "impl_files": [
-    "deps/llhttp/api.c",
-    "deps/llhttp/http.c",
-    "deps/llhttp/llhttp.c",
-    "deps/llhttp/llhttp.h",
-    "deps/ntlmclient/crypt.h",
-    "deps/ntlmclient/crypt_openssl.c",
-    "deps/ntlmclient/crypt_openssl.h",
-    "deps/ntlmclient/ntlm.c",
-    "deps/ntlmclient/ntlm.h",
-    "deps/ntlmclient/ntlmclient.h",
-    "deps/ntlmclient/unicode.h",
-    "deps/ntlmclient/unicode_builtin.c",
-    "deps/ntlmclient/unicode_builtin.h",
-    "deps/ntlmclient/utf8.h",
-    "deps/ntlmclient/util.c",
-    "deps/ntlmclient/util.h",
+  "closure": {
+    "impl_files": {
+      "included": [
+        "deps/llhttp/api.c",
+        "deps/llhttp/http.c",
+        "deps/llhttp/llhttp.c",
+        "deps/llhttp/llhttp.h",
+        "deps/ntlmclient/crypt.h",
+        "deps/ntlmclient/crypt_openssl.c",
+        "deps/ntlmclient/crypt_openssl.h",
+        "deps/ntlmclient/ntlm.c",
+        "deps/ntlmclient/ntlm.h",
+        "deps/ntlmclient/ntlmclient.h",
+        "deps/ntlmclient/unicode.h",
+        "deps/ntlmclient/unicode_builtin.c",
+        "deps/ntlmclient/unicode_builtin.h",
+        "deps/ntlmclient/utf8.h",
+        "deps/ntlmclient/util.c",
+        "deps/ntlmclient/util.h",
+        "deps/reftable/basics.c",
+        "deps/reftable/basics.h",
+        "deps/reftable/block.c",
+        "deps/reftable/block.h",
+        "deps/reftable/blocksource.c",
+        "deps/reftable/blocksource.h",
+        "deps/reftable/error.c",
+        "deps/reftable/fsck.c",
+        "deps/reftable/iter.c",
+        "deps/reftable/iter.h",
+        "deps/reftable/merged.c",
+        "deps/reftable/merged.h",
+        "deps/reftable/pq.c",
+        "deps/reftable/pq.h",
+        "deps/reftable/record.c",
+        "deps/reftable/record.h",
+        "deps/reftable/reftable-basics.h",
+        "deps/reftable/reftable-block.h",
+        "deps/reftable/reftable-blocksource.h",
+        "deps/reftable/reftable-error.h",
+        "deps/reftable/reftable-fsck.h",
+        "deps/reftable/reftable-iterator.h",
+        "deps/reftable/reftable-merged.h",
+        "deps/reftable/reftable-record.h",
+        "deps/reftable/reftable-stack.h",
+        "deps/reftable/reftable-table.h",
+        "deps/reftable/reftable-writer.h",
+        "deps/reftable/stack.c",
+        "deps/reftable/stack.h",
+        "deps/reftable/system.c",
+        "deps/reftable/system.h",
+        "deps/reftable/table.c",
+        "deps/reftable/table.h",
+        "deps/reftable/tree.c",
+        "deps/reftable/tree.h",
+        "deps/reftable/writer.c",
+        "deps/reftable/writer.h",
+        "deps/xdiff/git-xdiff.h",
+        "deps/xdiff/xdiff.h",
+        "deps/xdiff/xdiffi.c",
+        "deps/xdiff/xdiffi.h",
+        "deps/xdiff/xemit.c",
+        "deps/xdiff/xemit.h",
+        "deps/xdiff/xhistogram.c",
+        "deps/xdiff/xmerge.c",
+        "deps/xdiff/xpatience.c",
+        "deps/xdiff/xprepare.c",
+        "deps/xdiff/xprepare.h",
+        "deps/xdiff/xtypes.h",
+        "deps/xdiff/xutils.c",
+        "deps/xdiff/xutils.h",
+        "src/libgit2/annotated_commit.c",
+        "src/libgit2/annotated_commit.h",
+        "src/libgit2/apply.c",
+        "src/libgit2/apply.h",
+        "src/libgit2/attr.c",
+        "src/libgit2/attr_file.c",
+        "src/libgit2/attr_file.h",
+        "src/libgit2/attrcache.c",
+        "src/libgit2/attrcache.h",
+        "src/libgit2/blame.c",
+        "src/libgit2/blame.h",
+        "src/libgit2/blame_git.c",
+        "src/libgit2/blame_git.h",
+        "src/libgit2/blob.c",
+        "src/libgit2/blob.h",
+        "src/libgit2/branch.c",
+        "src/libgit2/branch.h",
+        "src/libgit2/buf.c",
+        "src/libgit2/buf.h",
+        "src/libgit2/cache.c",
+        "src/libgit2/cache.h",
+        "src/libgit2/checkout.c",
+        "src/libgit2/checkout.h",
+        "src/libgit2/cherrypick.c",
+        "src/libgit2/clone.c",
+        "src/libgit2/clone.h",
+        "src/libgit2/commit.c",
+        "src/libgit2/commit.h",
+        "src/libgit2/commit_graph.c",
+        "src/libgit2/commit_graph.h",
+        "src/libgit2/commit_list.c",
+        "src/libgit2/commit_list.h",
+        "src/libgit2/common.h",
+        "src/libgit2/config.c",
+        "src/libgit2/config.h",
+        "src/libgit2/config_backend.h",
+        "src/libgit2/config_cache.c",
+        "src/libgit2/config_file.c",
+        "src/libgit2/config_list.c",
+        "src/libgit2/config_list.h",
+        "src/libgit2/config_mem.c",
+        "src/libgit2/config_parse.c",
+        "src/libgit2/config_parse.h",
+        "src/libgit2/config_snapshot.c",
+        "src/libgit2/crlf.c",
+        "src/libgit2/delta.c",
+        "src/libgit2/delta.h",
+        "src/libgit2/describe.c",
+        "src/libgit2/diff.c",
+        "src/libgit2/diff.h",
+        "src/libgit2/diff_driver.c",
+        "src/libgit2/diff_driver.h",
+        "src/libgit2/diff_file.c",
+        "src/libgit2/diff_file.h",
+        "src/libgit2/diff_generate.c",
+        "src/libgit2/diff_generate.h",
+        "src/libgit2/diff_parse.c",
+        "src/libgit2/diff_parse.h",
+        "src/libgit2/diff_print.c",
+        "src/libgit2/diff_stats.c",
+        "src/libgit2/diff_stats.h",
+        "src/libgit2/diff_tform.c",
+        "src/libgit2/diff_tform.h",
+        "src/libgit2/diff_xdiff.c",
+        "src/libgit2/diff_xdiff.h",
+        "src/libgit2/email.c",
+        "src/libgit2/email.h",
+        "src/libgit2/fetch.c",
+        "src/libgit2/fetch.h",
+        "src/libgit2/fetchhead.c",
+        "src/libgit2/fetchhead.h",
+        "src/libgit2/filter.c",
+        "src/libgit2/filter.h",
+        "src/libgit2/grafts.c",
+        "src/libgit2/grafts.h",
+        "src/libgit2/graph.c",
+        "src/libgit2/hashmap_oid.h",
+        "src/libgit2/hashsig.c",
+        "src/libgit2/ident.c",
+        "src/libgit2/ignore.c",
+        "src/libgit2/ignore.h",
+        "src/libgit2/index.c",
+        "src/libgit2/index.h",
+        "src/libgit2/index_map.c",
+        "src/libgit2/index_map.h",
+        "src/libgit2/indexer.c",
+        "src/libgit2/indexer.h",
+        "src/libgit2/iterator.c",
+        "src/libgit2/iterator.h",
+        "src/libgit2/libgit2.c",
+        "src/libgit2/mailmap.c",
+        "src/libgit2/mailmap.h",
+        "src/libgit2/merge.c",
+        "src/libgit2/merge.h",
+        "src/libgit2/merge_driver.c",
+        "src/libgit2/merge_driver.h",
+        "src/libgit2/merge_file.c",
+        "src/libgit2/message.c",
+        "src/libgit2/midx.c",
+        "src/libgit2/midx.h",
+        "src/libgit2/mwindow.c",
+        "src/libgit2/mwindow.h",
+        "src/libgit2/notes.c",
+        "src/libgit2/notes.h",
+        "src/libgit2/object.c",
+        "src/libgit2/object.h",
+        "src/libgit2/object_api.c",
+        "src/libgit2/odb.c",
+        "src/libgit2/odb.h",
+        "src/libgit2/odb_loose.c",
+        "src/libgit2/odb_mempack.c",
+        "src/libgit2/odb_pack.c",
+        "src/libgit2/oid.c",
+        "src/libgit2/oid.h",
+        "src/libgit2/oidarray.c",
+        "src/libgit2/oidarray.h",
+        "src/libgit2/pack-objects.c",
+        "src/libgit2/pack-objects.h",
+        "src/libgit2/pack.c",
+        "src/libgit2/pack.h",
+        "src/libgit2/parse.c",
+        "src/libgit2/parse.h",
+        "src/libgit2/patch.c",
+        "src/libgit2/patch.h",
+        "src/libgit2/patch_generate.c",
+        "src/libgit2/patch_generate.h",
+        "src/libgit2/patch_parse.c",
+        "src/libgit2/patch_parse.h",
+        "src/libgit2/path.c",
+        "src/libgit2/path.h",
+        "src/libgit2/pathspec.c",
+        "src/libgit2/pathspec.h",
+        "src/libgit2/proxy.c",
+        "src/libgit2/proxy.h",
+        "src/libgit2/push.c",
+        "src/libgit2/push.h",
+        "src/libgit2/reader.c",
+        "src/libgit2/reader.h",
+        "src/libgit2/rebase.c",
+        "src/libgit2/refdb.c",
+        "src/libgit2/refdb.h",
+        "src/libgit2/refdb_fs.c",
+        "src/libgit2/refdb_reftable.c",
+        "src/libgit2/refdb_reftable.h",
+        "src/libgit2/reflog.c",
+        "src/libgit2/reflog.h",
+        "src/libgit2/refs.c",
+        "src/libgit2/refs.h",
+        "src/libgit2/refspec.c",
+        "src/libgit2/refspec.h",
+        "src/libgit2/remote.c",
+        "src/libgit2/remote.h",
+        "src/libgit2/repo_template.h",
+        "src/libgit2/repository.c",
+        "src/libgit2/repository.h",
+        "src/libgit2/reset.c",
+        "src/libgit2/revert.c",
+        "src/libgit2/revparse.c",
+        "src/libgit2/revwalk.c",
+        "src/libgit2/revwalk.h",
+        "src/libgit2/settings.c",
+        "src/libgit2/settings.h",
+        "src/libgit2/signature.c",
+        "src/libgit2/signature.h",
+        "src/libgit2/stash.c",
+        "src/libgit2/status.c",
+        "src/libgit2/status.h",
+        "src/libgit2/strarray.c",
+        "src/libgit2/strarray.h",
+        "src/libgit2/stream.h",
+        "src/libgit2/streams/mbedtls.c",
+        "src/libgit2/streams/mbedtls.h",
+        "src/libgit2/streams/openssl.c",
+        "src/libgit2/streams/openssl.h",
+        "src/libgit2/streams/registry.c",
+        "src/libgit2/streams/registry.h",
+        "src/libgit2/streams/socket.c",
+        "src/libgit2/streams/socket.h",
+        "src/libgit2/streams/tls.c",
+        "src/libgit2/streams/tls.h",
+        "src/libgit2/submodule.c",
+        "src/libgit2/submodule.h",
+        "src/libgit2/sysdir.c",
+        "src/libgit2/sysdir.h",
+        "src/libgit2/tag.c",
+        "src/libgit2/tag.h",
+        "src/libgit2/trace.c",
+        "src/libgit2/trace.h",
+        "src/libgit2/trailer.c",
+        "src/libgit2/transaction.c",
+        "src/libgit2/transaction.h",
+        "src/libgit2/transport.c",
+        "src/libgit2/transports/auth.c",
+        "src/libgit2/transports/auth.h",
+        "src/libgit2/transports/auth_ntlm.h",
+        "src/libgit2/transports/auth_ntlmclient.c",
+        "src/libgit2/transports/credential.c",
+        "src/libgit2/transports/credential_helpers.c",
+        "src/libgit2/transports/git.c",
+        "src/libgit2/transports/http.c",
+        "src/libgit2/transports/http.h",
+        "src/libgit2/transports/httpclient.c",
+        "src/libgit2/transports/httpclient.h",
+        "src/libgit2/transports/httpparser.c",
+        "src/libgit2/transports/httpparser.h",
+        "src/libgit2/transports/local.c",
+        "src/libgit2/transports/smart.c",
+        "src/libgit2/transports/smart.h",
+        "src/libgit2/transports/smart_pkt.c",
+        "src/libgit2/transports/smart_protocol.c",
+        "src/libgit2/transports/ssh.c",
+        "src/libgit2/transports/ssh_libssh2.c",
+        "src/libgit2/transports/ssh_libssh2.h",
+        "src/libgit2/tree-cache.c",
+        "src/libgit2/tree-cache.h",
+        "src/libgit2/tree.c",
+        "src/libgit2/tree.h",
+        "src/libgit2/userdiff.h",
+        "src/libgit2/worktree.c",
+        "src/libgit2/worktree.h",
+        "src/util/alloc.c",
+        "src/util/alloc.h",
+        "src/util/allocators/debugalloc.c",
+        "src/util/allocators/debugalloc.h",
+        "src/util/allocators/failalloc.c",
+        "src/util/allocators/failalloc.h",
+        "src/util/allocators/stdalloc.c",
+        "src/util/allocators/stdalloc.h",
+        "src/util/allocators/win32_leakcheck.c",
+        "src/util/allocators/win32_leakcheck.h",
+        "src/util/array.h",
+        "src/util/bitvec.h",
+        "src/util/date.c",
+        "src/util/date.h",
+        "src/util/errors.c",
+        "src/util/errors.h",
+        "src/util/filebuf.c",
+        "src/util/filebuf.h",
+        "src/util/fs_path.c",
+        "src/util/fs_path.h",
+        "src/util/futils.c",
+        "src/util/futils.h",
+        "src/util/git2_util.h",
+        "src/util/hash.c",
+        "src/util/hash.h",
+        "src/util/hash/collisiondetect.c",
+        "src/util/hash/collisiondetect.h",
+        "src/util/hash/openssl.c",
+        "src/util/hash/openssl.h",
+        "src/util/hash/sha.h",
+        "src/util/hash/sha1dc/sha1.c",
+        "src/util/hash/sha1dc/sha1.h",
+        "src/util/hash/sha1dc/ubc_check.c",
+        "src/util/hash/sha1dc/ubc_check.h",
+        "src/util/hashmap_str.h",
+        "src/util/integer.h",
+        "src/util/map.h",
+        "src/util/net.c",
+        "src/util/net.h",
+        "src/util/pool.c",
+        "src/util/pool.h",
+        "src/util/posix.c",
+        "src/util/posix.h",
+        "src/util/pqueue.c",
+        "src/util/pqueue.h",
+        "src/util/process.h",
+        "src/util/rand.c",
+        "src/util/rand.h",
+        "src/util/regexp.c",
+        "src/util/regexp.h",
+        "src/util/runtime.c",
+        "src/util/runtime.h",
+        "src/util/sortedcache.c",
+        "src/util/sortedcache.h",
+        "src/util/staticstr.h",
+        "src/util/str.c",
+        "src/util/str.h",
+        "src/util/strlist.c",
+        "src/util/strlist.h",
+        "src/util/thread.c",
+        "src/util/thread.h",
+        "src/util/tsort.c",
+        "src/util/unix/map.c",
+        "src/util/unix/posix.h",
+        "src/util/unix/process.c",
+        "src/util/unix/pthread.h",
+        "src/util/unix/realpath.c",
+        "src/util/utf8.c",
+        "src/util/utf8.h",
+        "src/util/util.c",
+        "src/util/util.h",
+        "src/util/varint.c",
+        "src/util/varint.h",
+        "src/util/vector.c",
+        "src/util/vector.h",
+        "src/util/wildmatch.c",
+        "src/util/wildmatch.h",
+        "src/util/zstream.c",
+        "src/util/zstream.h"
+      ]
+    },
+    "api_headers": {
+      "included": [
+        "include/git2/annotated_commit.h",
+        "include/git2/apply.h",
+        "include/git2/attr.h",
+        "include/git2/blame.h",
+        "include/git2/blob.h",
+        "include/git2/branch.h",
+        "include/git2/buffer.h",
+        "include/git2/cert.h",
+        "include/git2/checkout.h",
+        "include/git2/cherrypick.h",
+        "include/git2/clone.h",
+        "include/git2/commit.h",
+        "include/git2/common.h",
+        "include/git2/config.h",
+        "include/git2/credential.h",
+        "include/git2/credential_helpers.h",
+        "include/git2/describe.h",
+        "include/git2/diff.h",
+        "include/git2/email.h",
+        "include/git2/errors.h",
+        "include/git2/filter.h",
+        "include/git2/global.h",
+        "include/git2/graph.h",
+        "include/git2/ignore.h",
+        "include/git2/index.h",
+        "include/git2/indexer.h",
+        "include/git2/mailmap.h",
+        "include/git2/merge.h",
+        "include/git2/message.h",
+        "include/git2/net.h",
+        "include/git2/notes.h",
+        "include/git2/object.h",
+        "include/git2/odb.h",
+        "include/git2/odb_backend.h",
+        "include/git2/oid.h",
+        "include/git2/oidarray.h",
+        "include/git2/pack.h",
+        "include/git2/patch.h",
+        "include/git2/pathspec.h",
+        "include/git2/proxy.h",
+        "include/git2/rebase.h",
+        "include/git2/refdb.h",
+        "include/git2/reflog.h",
+        "include/git2/refs.h",
+        "include/git2/refspec.h",
+        "include/git2/remote.h",
+        "include/git2/repository.h",
+        "include/git2/reset.h",
+        "include/git2/revert.h",
+        "include/git2/revparse.h",
+        "include/git2/revwalk.h",
+        "include/git2/signature.h",
+        "include/git2/stash.h",
+        "include/git2/status.h",
+        "include/git2/strarray.h",
+        "include/git2/submodule.h",
+        "include/git2/sys/alloc.h",
+        "include/git2/sys/commit.h",
+        "include/git2/sys/commit_graph.h",
+        "include/git2/sys/config.h",
+        "include/git2/sys/credential.h",
+        "include/git2/sys/diff.h",
+        "include/git2/sys/email.h",
+        "include/git2/sys/errors.h",
+        "include/git2/sys/filter.h",
+        "include/git2/sys/hashsig.h",
+        "include/git2/sys/index.h",
+        "include/git2/sys/mempack.h",
+        "include/git2/sys/merge.h",
+        "include/git2/sys/midx.h",
+        "include/git2/sys/odb_backend.h",
+        "include/git2/sys/openssl.h",
+        "include/git2/sys/path.h",
+        "include/git2/sys/refdb_backend.h",
+        "include/git2/sys/refs.h",
+        "include/git2/sys/remote.h",
+        "include/git2/sys/repository.h",
+        "include/git2/sys/stream.h",
+        "include/git2/sys/transport.h",
+        "include/git2/tag.h",
+        "include/git2/trace.h",
+        "include/git2/transaction.h",
+        "include/git2/transport.h",
+        "include/git2/tree.h",
+        "include/git2/types.h",
+        "include/git2/worktree.h"
+      ]
+    }
+  },
+  "modules": [
+    {
+      "name": "libgit2/deps/reftable/basics.c (foundational)",
+      "files": [
+        "deps/reftable/basics.c",
+        "deps/reftable/basics.h",
+        "deps/reftable/reftable-basics.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/allocators/failalloc.c (foundational)",
+      "files": [
+        "src/util/allocators/failalloc.c",
+        "src/util/allocators/failalloc.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/alloc.c (foundational)",
+      "files": [
+        "src/util/alloc.c",
+        "src/util/alloc.h",
+        {
+          "path": "include/git2/sys/alloc.h",
+          "items": {
+            "excluded": [
+              {
+                "name": "git_win32_crtdbg_init_allocator",
+                "kind": "symbol"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/util/allocators/debugalloc.c (foundational)",
+      "files": [
+        "src/util/allocators/debugalloc.c",
+        "src/util/allocators/debugalloc.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/allocators/stdalloc.c (foundational)",
+      "files": [
+        "src/util/allocators/stdalloc.c",
+        "src/util/allocators/stdalloc.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/allocators/win32_leakcheck.c (foundational)",
+      "files": [
+        "src/util/allocators/win32_leakcheck.c",
+        "src/util/allocators/win32_leakcheck.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/strlist.c (foundational)",
+      "files": [
+        "src/util/strlist.c",
+        "src/util/strlist.h"
+      ]
+    },
+    {
+      "name": "libgit2/deps/llhttp/llhttp.c",
+      "files": [
+        "deps/llhttp/llhttp.c",
+        {
+          "path": "deps/llhttp/llhttp.h",
+          "items": {
+            "excluded": [
+              {
+                "name": "llhttp_alloc",
+                "kind": "symbol"
+              },
+              {
+                "name": "llhttp_free",
+                "kind": "symbol"
+              },
+              {
+                "name": "llhttp_settings_s",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/deps/llhttp/api.c",
+      "files": [
+        "deps/llhttp/api.c",
+        {
+          "path": "deps/llhttp/llhttp.h",
+          "items": {
+            "included": [
+              {
+                "name": "llhttp_finish",
+                "kind": "type"
+              },
+              {
+                "name": "llhttp_settings_s",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/deps/llhttp/http.c",
+      "files": [
+        "deps/llhttp/http.c"
+      ]
+    },
+    {
+      "name": "libgit2/deps/ntlmclient/utf8.h",
+      "files": [
+        {
+          "path": "deps/ntlmclient/utf8.h",
+          "items": {
+            "excluded": [
+              {
+                "name": "utf8coll",
+                "kind": "symbol"
+              },
+              {
+                "name": "utf8fry",
+                "kind": "symbol"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/deps/ntlmclient/util.c",
+      "files": [
+        "deps/ntlmclient/util.c",
+        "deps/ntlmclient/util.h"
+      ]
+    },
+    {
+      "name": "libgit2/deps/ntlmclient/ntlm.c",
+      "files": [
+        "deps/ntlmclient/ntlm.c",
+        "deps/ntlmclient/ntlm.h",
+        {
+          "path": "deps/ntlmclient/ntlmclient.h",
+          "items": {
+            "included": [
+              {
+                "name": "ntlm_client_flags",
+                "kind": "type"
+              },
+              {
+                "name": "ntlm_error_code",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/deps/ntlmclient/crypt_openssl.c",
+      "files": [
+        "deps/ntlmclient/crypt_openssl.c",
+        "deps/ntlmclient/crypt_openssl.h"
+      ]
+    },
+    {
+      "name": "libgit2/deps/ntlmclient/unicode_builtin.c",
+      "files": [
+        "deps/ntlmclient/unicode_builtin.c",
+        "deps/ntlmclient/unicode_builtin.h"
+      ]
+    },
+    {
+      "name": "libgit2/deps/reftable/error.c",
+      "files": [
+        "deps/reftable/error.c",
+        "deps/reftable/reftable-error.h"
+      ]
+    },
+    {
+      "name": "libgit2/deps/reftable/record.c",
+      "files": [
+        "deps/reftable/record.c",
+        "deps/reftable/record.h",
+        "deps/reftable/reftable-record.h"
+      ]
+    },
+    {
+      "name": "libgit2/deps/reftable/pq.c",
+      "files": [
+        "deps/reftable/pq.c",
+        "deps/reftable/pq.h"
+      ]
+    },
+    {
+      "name": "libgit2/deps/reftable/tree.c",
+      "files": [
+        "deps/reftable/tree.c",
+        "deps/reftable/tree.h"
+      ]
+    },
+    {
+      "name": "libgit2/deps/xdiff/xutils.c",
+      "files": [
+        "deps/xdiff/xutils.c",
+        {
+          "path": "deps/xdiff/xdiff.h",
+          "items": {
+            "included": [
+              {
+                "name": "s_mmbuffer",
+                "kind": "type"
+              },
+              {
+                "name": "s_mmfile",
+                "kind": "type"
+              }
+            ]
+          }
+        },
+        {
+          "path": "deps/xdiff/xtypes.h",
+          "items": {
+            "included": [
+              {
+                "name": "s_chanode",
+                "kind": "type"
+              },
+              {
+                "name": "s_chastore",
+                "kind": "type"
+              }
+            ]
+          }
+        },
+        "deps/xdiff/xutils.h"
+      ]
+    },
+    {
+      "name": "libgit2/deps/xdiff/xprepare.c",
+      "files": [
+        "deps/xdiff/xprepare.c",
+        "deps/xdiff/xprepare.h",
+        {
+          "path": "deps/xdiff/xtypes.h",
+          "items": {
+            "included": [
+              {
+                "name": "s_xdfenv",
+                "kind": "type"
+              },
+              {
+                "name": "s_xdfile",
+                "kind": "type"
+              },
+              {
+                "name": "s_xrecord",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/common.h",
+      "files": [
+        {
+          "path": "src/libgit2/common.h",
+          "items": {
+            "excluded": [
+              {
+                "name": "git_error__check_version",
+                "kind": "symbol"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/streams/mbedtls.c",
+      "files": [
+        "src/libgit2/streams/mbedtls.c",
+        "src/libgit2/streams/mbedtls.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/transports/httpparser.c",
+      "files": [
+        "src/libgit2/transports/httpparser.c",
+        "src/libgit2/transports/httpparser.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/bitvec.h",
+      "files": [
+        "src/util/bitvec.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/hash/sha1dc/ubc_check.c",
+      "files": [
+        "src/util/hash/sha1dc/ubc_check.c",
+        "src/util/hash/sha1dc/ubc_check.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/hash/sha1dc/sha1.c",
+      "files": [
+        "src/util/hash/sha1dc/sha1.c",
+        "src/util/hash/sha1dc/sha1.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/integer.h",
+      "files": [
+        "src/util/integer.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/staticstr.h",
+      "files": [
+        "src/util/staticstr.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/thread.c",
+      "files": [
+        "src/util/thread.c",
+        "src/util/thread.h",
+        {
+          "path": "src/util/unix/pthread.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_thread",
+                "kind": "type"
+              },
+              {
+                "name": "git_threads_global_init",
+                "kind": "symbol"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/util/errors.c",
+      "files": [
+        "src/util/errors.c",
+        {
+          "path": "src/libgit2/common.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_error__check_version",
+                "kind": "symbol"
+              }
+            ]
+          }
+        },
+        "src/util/errors.h",
+        "include/git2/errors.h",
+        "include/git2/sys/errors.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/proxy.c",
+      "files": [
+        "src/libgit2/proxy.c",
+        "src/libgit2/proxy.h",
+        "include/git2/proxy.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/strarray.c",
+      "files": [
+        "src/libgit2/strarray.c",
+        "src/libgit2/strarray.h",
+        "include/git2/strarray.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/array.h",
+      "files": [
+        "src/util/array.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/hash/collisiondetect.c",
+      "files": [
+        "src/util/hash/collisiondetect.c",
+        "src/util/hash/collisiondetect.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/hash/openssl.c",
+      "files": [
+        "src/util/hash/openssl.c",
+        "src/util/hash/openssl.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/hash.c",
+      "files": [
+        "src/util/hash.c",
+        "src/util/hash.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/hashmap_str.h",
+      "files": [
+        "src/util/hashmap_str.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/regexp.c",
+      "files": [
+        "src/util/regexp.c",
+        {
+          "path": "deps/xdiff/git-xdiff.h",
+          "items": {
+            "included": [
+              {
+                "name": "xdl_regexec_buf",
+                "kind": "symbol"
+              }
+            ]
+          }
+        },
+        "src/util/regexp.h"
+      ]
+    },
+    {
+      "name": "libgit2/deps/xdiff/xdiffi.c",
+      "files": [
+        "deps/xdiff/xdiffi.c",
+        {
+          "path": "deps/xdiff/xdiff.h",
+          "items": {
+            "included": [
+              {
+                "name": "s_bdiffparam",
+                "kind": "type"
+              },
+              {
+                "name": "s_xpparam",
+                "kind": "type"
+              },
+              {
+                "name": "xdl_emit_hunk_consume_func_t",
+                "kind": "symbol"
+              }
+            ]
+          }
+        },
+        "deps/xdiff/xdiffi.h"
+      ]
+    },
+    {
+      "name": "libgit2/deps/xdiff/xemit.c",
+      "files": [
+        "deps/xdiff/xemit.c",
+        {
+          "path": "deps/xdiff/xdiff.h",
+          "items": {
+            "included": [
+              {
+                "name": "find_func_t",
+                "kind": "symbol"
+              },
+              {
+                "name": "s_xdemitcb",
+                "kind": "type"
+              },
+              {
+                "name": "s_xdemitconf",
+                "kind": "type"
+              }
+            ]
+          }
+        },
+        "deps/xdiff/xemit.h"
+      ]
+    },
+    {
+      "name": "libgit2/deps/xdiff/xhistogram.c",
+      "files": [
+        "deps/xdiff/xhistogram.c"
+      ]
+    },
+    {
+      "name": "libgit2/deps/xdiff/xmerge.c",
+      "files": [
+        "deps/xdiff/xmerge.c",
+        {
+          "path": "deps/xdiff/xdiff.h",
+          "items": {
+            "included": [
+              {
+                "name": "s_xmparam",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/deps/xdiff/xpatience.c",
+      "files": [
+        "deps/xdiff/xpatience.c"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/runtime.c",
+      "files": [
+        "src/util/runtime.c",
+        "src/util/runtime.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/str.c",
+      "files": [
+        "src/util/str.c",
+        "src/util/str.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/buf.c",
+      "files": [
+        "src/libgit2/buf.c",
+        "src/libgit2/buf.h",
+        {
+          "path": "include/git2/buffer.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_buf",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/message.c",
+      "files": [
+        "src/libgit2/message.c",
+        {
+          "path": "include/git2/message.h",
+          "items": {
+            "excluded": [
+              {
+                "name": "git_message_trailer",
+                "kind": "type"
+              },
+              {
+                "name": "git_message_trailer_array",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/trace.c",
+      "files": [
+        "src/libgit2/trace.c",
+        "src/libgit2/trace.h",
+        "include/git2/trace.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/date.c",
+      "files": [
+        "src/util/date.c",
+        "src/util/date.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/unix/map.c",
+      "files": [
+        "src/util/unix/map.c",
+        "src/util/map.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/pool.c",
+      "files": [
+        "src/util/pool.c",
+        "src/util/pool.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/unix/realpath.c",
+      "files": [
+        "src/util/unix/realpath.c"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/utf8.c",
+      "files": [
+        "src/util/utf8.c",
+        "src/util/utf8.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/util.c",
+      "files": [
+        "src/util/util.c",
+        "src/util/util.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/oid.c",
+      "files": [
+        "src/libgit2/oid.c",
+        {
+          "path": "src/libgit2/hashmap_oid.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_hashmap_oid_hashcode",
+                "kind": "symbol"
+              }
+            ]
+          }
+        },
+        "src/libgit2/oid.h",
+        {
+          "path": "include/git2/oid.h",
+          "items": {
+            "excluded": [
+              {
+                "name": "git_oid_fromraw",
+                "kind": "symbol"
+              },
+              {
+                "name": "git_oid_fromstr",
+                "kind": "symbol"
+              },
+              {
+                "name": "git_oid_fromstrn",
+                "kind": "symbol"
+              },
+              {
+                "name": "git_oid_fromstrp",
+                "kind": "symbol"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/oidarray.c",
+      "files": [
+        "src/libgit2/oidarray.c",
+        "src/libgit2/oidarray.h",
+        "include/git2/oidarray.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/parse.c",
+      "files": [
+        "src/libgit2/parse.c",
+        "src/libgit2/parse.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/config_parse.c",
+      "files": [
+        "src/libgit2/config_parse.c",
+        "src/libgit2/config_parse.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/trailer.c",
+      "files": [
+        "src/libgit2/trailer.c",
+        {
+          "path": "include/git2/message.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_message_trailer",
+                "kind": "type"
+              },
+              {
+                "name": "git_message_trailer_array",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/transports/credential.c",
+      "files": [
+        "src/libgit2/transports/credential.c",
+        "include/git2/credential.h",
+        "include/git2/sys/credential.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/transports/credential_helpers.c",
+      "files": [
+        "src/libgit2/transports/credential_helpers.c",
+        "include/git2/credential_helpers.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/net.c",
+      "files": [
+        "src/util/net.c",
+        "src/util/net.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/transports/auth.c",
+      "files": [
+        "src/libgit2/transports/auth.c",
+        "src/libgit2/transports/auth.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/transports/auth_ntlmclient.c",
+      "files": [
+        "src/libgit2/transports/auth_ntlmclient.c"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/rand.c",
+      "files": [
+        "src/util/rand.c",
+        "src/util/rand.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/tsort.c",
+      "files": [
+        "src/util/tsort.c"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/varint.c",
+      "files": [
+        "src/util/varint.c",
+        "src/util/varint.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/vector.c",
+      "files": [
+        "src/util/vector.c",
+        "src/util/vector.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/fs_path.c",
+      "files": [
+        "src/util/fs_path.c",
+        "src/util/fs_path.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/sysdir.c",
+      "files": [
+        "src/libgit2/sysdir.c",
+        "src/libgit2/sysdir.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/posix.c",
+      "files": [
+        "src/util/posix.c",
+        {
+          "path": "src/util/posix.h",
+          "items": {
+            "excluded": [
+              {
+                "name": "p_pread",
+                "kind": "symbol"
+              },
+              {
+                "name": "p_pwrite",
+                "kind": "symbol"
+              }
+            ]
+          }
+        },
+        "src/util/unix/posix.h"
+      ]
+    },
+    {
+      "name": "libgit2/deps/reftable/system.c",
+      "files": [
+        "deps/reftable/system.c",
+        "deps/reftable/system.h"
+      ]
+    },
+    {
+      "name": "libgit2/deps/reftable/blocksource.c",
+      "files": [
+        "deps/reftable/blocksource.c",
+        "deps/reftable/blocksource.h",
+        "deps/reftable/reftable-blocksource.h"
+      ]
+    },
+    {
+      "name": "libgit2/deps/reftable/block.c",
+      "files": [
+        "deps/reftable/block.c",
+        "deps/reftable/block.h",
+        "deps/reftable/reftable-block.h"
+      ]
+    },
+    {
+      "name": "libgit2/deps/reftable/iter.c",
+      "files": [
+        "deps/reftable/iter.c",
+        "deps/reftable/iter.h",
+        "deps/reftable/reftable-iterator.h"
+      ]
+    },
+    {
+      "name": "libgit2/deps/reftable/table.c",
+      "files": [
+        "deps/reftable/table.c",
+        "deps/reftable/reftable-table.h",
+        "deps/reftable/table.h"
+      ]
+    },
+    {
+      "name": "libgit2/deps/reftable/merged.c",
+      "files": [
+        "deps/reftable/merged.c",
+        "deps/reftable/merged.h",
+        "deps/reftable/reftable-merged.h"
+      ]
+    },
+    {
+      "name": "libgit2/deps/reftable/writer.c",
+      "files": [
+        "deps/reftable/writer.c",
+        "deps/reftable/reftable-writer.h",
+        "deps/reftable/writer.h"
+      ]
+    },
+    {
+      "name": "libgit2/deps/reftable/stack.c",
+      "files": [
+        "deps/reftable/stack.c",
+        "deps/reftable/reftable-stack.h",
+        "deps/reftable/stack.h"
+      ]
+    },
+    {
+      "name": "libgit2/deps/reftable/fsck.c",
+      "files": [
+        "deps/reftable/fsck.c",
+        "deps/reftable/reftable-fsck.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/futils.c",
+      "files": [
+        "src/util/futils.c",
+        "src/util/futils.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/grafts.c",
+      "files": [
+        "src/libgit2/grafts.c",
+        "src/libgit2/grafts.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/hashsig.c",
+      "files": [
+        "src/libgit2/hashsig.c",
+        "include/git2/sys/hashsig.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/filebuf.c",
+      "files": [
+        "src/util/filebuf.c",
+        "src/util/filebuf.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/repository.c",
+      "files": [
+        "src/libgit2/repository.c",
+        {
+          "path": "src/libgit2/repo_template.h",
+          "items": {
+            "included": [
+              {
+                "name": "repo_template",
+                "kind": "symbol"
+              },
+              {
+                "name": "repo_template_item",
+                "kind": "type"
+              }
+            ]
+          }
+        },
+        "src/libgit2/repository.h",
+        "include/git2/repository.h",
+        "include/git2/sys/repository.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/config.c",
+      "files": [
+        "src/libgit2/config.c",
+        {
+          "path": "src/libgit2/config.h",
+          "items": {
+            "excluded": [
+              {
+                "name": "git_config__find_programdata",
+                "kind": "symbol"
+              }
+            ]
+          }
+        },
+        {
+          "path": "src/libgit2/config_backend.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_config_backend_delete",
+                "kind": "symbol"
+              },
+              {
+                "name": "git_config_backend_foreach",
+                "kind": "symbol"
+              },
+              {
+                "name": "git_config_backend_free",
+                "kind": "symbol"
+              },
+              {
+                "name": "git_config_backend_get_string",
+                "kind": "symbol"
+              },
+              {
+                "name": "git_config_backend_lock",
+                "kind": "symbol"
+              },
+              {
+                "name": "git_config_backend_open",
+                "kind": "symbol"
+              },
+              {
+                "name": "git_config_backend_set_string",
+                "kind": "symbol"
+              },
+              {
+                "name": "git_config_backend_unlock",
+                "kind": "symbol"
+              }
+            ]
+          }
+        },
+        "include/git2/config.h",
+        {
+          "path": "include/git2/sys/config.h",
+          "items": {
+            "excluded": [
+              {
+                "name": "git_config_backend_memory_options",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/config_cache.c",
+      "files": [
+        "src/libgit2/config_cache.c"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/config_list.c",
+      "files": [
+        "src/libgit2/config_list.c",
+        "src/libgit2/config_list.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/config_snapshot.c",
+      "files": [
+        "src/libgit2/config_snapshot.c"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/config_mem.c",
+      "files": [
+        "src/libgit2/config_mem.c",
+        {
+          "path": "include/git2/sys/config.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_config_backend_memory_options",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/fetchhead.c",
+      "files": [
+        "src/libgit2/fetchhead.c",
+        "src/libgit2/fetchhead.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/object.c",
+      "files": [
+        "src/libgit2/object.c",
+        {
+          "path": "src/libgit2/object.h",
+          "items": {
+            "excluded": [
+              {
+                "name": "git_object__resolve_to_type",
+                "kind": "symbol"
+              }
+            ]
+          }
+        },
+        "include/git2/object.h",
+        {
+          "path": "include/git2/types.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_object_t",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/object_api.c",
+      "files": [
+        "src/libgit2/object_api.c"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/odb.c",
+      "files": [
+        "src/libgit2/odb.c",
+        "src/libgit2/odb.h",
+        "include/git2/odb.h",
+        {
+          "path": "include/git2/odb_backend.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_odb_stream",
+                "kind": "type"
+              },
+              {
+                "name": "git_odb_stream_t",
+                "kind": "type"
+              },
+              {
+                "name": "git_odb_writepack",
+                "kind": "type"
+              }
+            ]
+          }
+        },
+        {
+          "path": "include/git2/sys/odb_backend.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_odb_backend",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/blob.c",
+      "files": [
+        "src/libgit2/blob.c",
+        "src/libgit2/blob.h",
+        "include/git2/blob.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/cache.c",
+      "files": [
+        "src/libgit2/cache.c",
+        "src/libgit2/cache.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/path.c",
+      "files": [
+        "src/libgit2/path.c",
+        "src/libgit2/path.h",
+        "include/git2/sys/path.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/refs.c",
+      "files": [
+        "src/libgit2/refs.c",
+        "src/libgit2/refs.h",
+        "include/git2/refs.h",
+        "include/git2/sys/refs.h",
+        {
+          "path": "include/git2/types.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_reference_t",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/index.c",
+      "files": [
+        "src/libgit2/index.c",
+        "src/libgit2/index.h",
+        {
+          "path": "include/git2/index.h",
+          "items": {
+            "excluded": [
+              {
+                "name": "git_index_checksum",
+                "kind": "symbol"
+              }
+            ]
+          }
+        },
+        "include/git2/sys/index.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/diff.c",
+      "files": [
+        "src/libgit2/diff.c",
+        "src/libgit2/diff.h",
+        {
+          "path": "include/git2/diff.h",
+          "items": {
+            "excluded": [
+              {
+                "name": "git_diff_parse_options",
+                "kind": "type"
+              },
+              {
+                "name": "git_diff_stats_format_t",
+                "kind": "type"
+              }
+            ]
+          }
+        },
+        "include/git2/sys/diff.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/index_map.c",
+      "files": [
+        "src/libgit2/index_map.c",
+        "src/libgit2/index_map.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/patch.c",
+      "files": [
+        "src/libgit2/patch.c",
+        {
+          "path": "src/libgit2/patch.h",
+          "items": {
+            "excluded": [
+              {
+                "name": "git_patch_options",
+                "kind": "type"
+              }
+            ]
+          }
+        },
+        "include/git2/patch.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/diff_print.c",
+      "files": [
+        "src/libgit2/diff_print.c"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/diff_stats.c",
+      "files": [
+        "src/libgit2/diff_stats.c",
+        "src/libgit2/diff_stats.h",
+        {
+          "path": "include/git2/diff.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_diff_stats_format_t",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/patch_parse.c",
+      "files": [
+        "src/libgit2/patch_parse.c",
+        {
+          "path": "src/libgit2/patch.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_patch_options",
+                "kind": "type"
+              }
+            ]
+          }
+        },
+        "src/libgit2/patch_parse.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/diff_parse.c",
+      "files": [
+        "src/libgit2/diff_parse.c",
+        "src/libgit2/diff_parse.h",
+        {
+          "path": "include/git2/diff.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_diff_parse_options",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/refdb.c",
+      "files": [
+        "src/libgit2/refdb.c",
+        {
+          "path": "src/libgit2/refdb.h",
+          "items": {
+            "excluded": [
+              {
+                "name": "git_refdb_reflog_write",
+                "kind": "symbol"
+              }
+            ]
+          }
+        },
+        "include/git2/refdb.h",
+        {
+          "path": "include/git2/sys/refdb_backend.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_refdb_backend",
+                "kind": "type"
+              },
+              {
+                "name": "git_refdb_backend_init_flag_t",
+                "kind": "type"
+              },
+              {
+                "name": "git_reference_iterator",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/remote.c",
+      "files": [
+        "src/libgit2/remote.c",
+        "src/libgit2/remote.h",
+        {
+          "path": "include/git2/net.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_direction",
+                "kind": "type"
+              },
+              {
+                "name": "git_remote_head",
+                "kind": "type"
+              }
+            ]
+          }
+        },
+        {
+          "path": "include/git2/remote.h",
+          "items": {
+            "excluded": [
+              {
+                "name": "git_url_resolve_cb",
+                "kind": "symbol"
+              }
+            ]
+          }
+        },
+        "include/git2/sys/remote.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/signature.c",
+      "files": [
+        "src/libgit2/signature.c",
+        "src/libgit2/signature.h",
+        "include/git2/signature.h",
+        {
+          "path": "include/git2/types.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_signature",
+                "kind": "type"
+              },
+              {
+                "name": "git_time",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/reflog.c",
+      "files": [
+        "src/libgit2/reflog.c",
+        "src/libgit2/reflog.h",
+        "include/git2/reflog.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/transaction.c",
+      "files": [
+        "src/libgit2/transaction.c",
+        "src/libgit2/transaction.h",
+        "include/git2/transaction.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/tree.c",
+      "files": [
+        "src/libgit2/tree.c",
+        "src/libgit2/tree.h",
+        "include/git2/tree.h",
+        {
+          "path": "include/git2/types.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_filemode_t",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/commit.c",
+      "files": [
+        "src/libgit2/commit.c",
+        "src/libgit2/commit.h",
+        "include/git2/commit.h",
+        "include/git2/sys/commit.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/tree-cache.c",
+      "files": [
+        "src/libgit2/tree-cache.c",
+        {
+          "path": "src/libgit2/tree-cache.h",
+          "items": {
+            "excluded": [
+              {
+                "name": "git_tree_cache_free",
+                "kind": "symbol"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/util/pqueue.c",
+      "files": [
+        "src/util/pqueue.c",
+        "src/util/pqueue.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/sortedcache.c",
+      "files": [
+        "src/util/sortedcache.c",
+        "src/util/sortedcache.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/unix/process.c",
+      "files": [
+        "src/util/unix/process.c",
+        "src/util/process.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/wildmatch.c",
+      "files": [
+        "src/util/wildmatch.c",
+        "src/util/wildmatch.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/attr_file.c",
+      "files": [
+        "src/libgit2/attr_file.c",
+        "src/libgit2/attr_file.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/attr.c",
+      "files": [
+        "src/libgit2/attr.c",
+        "include/git2/attr.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/attrcache.c",
+      "files": [
+        "src/libgit2/attrcache.c",
+        "src/libgit2/attrcache.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/config_file.c",
+      "files": [
+        "src/libgit2/config_file.c"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/diff_driver.c",
+      "files": [
+        "src/libgit2/diff_driver.c",
+        "src/libgit2/diff_driver.h",
+        {
+          "path": "src/libgit2/userdiff.h",
+          "items": {
+            "included": [
+              {
+                "name": "builtin_defs",
+                "kind": "symbol"
+              },
+              {
+                "name": "git_diff_driver_definition",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/filter.c",
+      "files": [
+        "src/libgit2/filter.c",
+        "src/libgit2/filter.h",
+        "include/git2/filter.h",
+        "include/git2/sys/filter.h",
+        {
+          "path": "include/git2/types.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_writestream",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/crlf.c",
+      "files": [
+        "src/libgit2/crlf.c"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/ident.c",
+      "files": [
+        "src/libgit2/ident.c"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/ignore.c",
+      "files": [
+        "src/libgit2/ignore.c",
+        "src/libgit2/ignore.h",
+        "include/git2/ignore.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/iterator.c",
+      "files": [
+        "src/libgit2/iterator.c",
+        "src/libgit2/iterator.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/diff_generate.c",
+      "files": [
+        "src/libgit2/diff_generate.c",
+        "src/libgit2/diff_generate.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/diff_tform.c",
+      "files": [
+        "src/libgit2/diff_tform.c",
+        "src/libgit2/diff_tform.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/notes.c",
+      "files": [
+        "src/libgit2/notes.c",
+        "src/libgit2/notes.h",
+        "include/git2/notes.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/pathspec.c",
+      "files": [
+        "src/libgit2/pathspec.c",
+        "src/libgit2/pathspec.h",
+        "include/git2/pathspec.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/reader.c",
+      "files": [
+        "src/libgit2/reader.c",
+        "src/libgit2/reader.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/refdb_reftable.c",
+      "files": [
+        "src/libgit2/refdb_reftable.c",
+        "src/libgit2/refdb_reftable.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/refspec.c",
+      "files": [
+        "src/libgit2/refspec.c",
+        "src/libgit2/refspec.h",
+        "include/git2/refspec.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/branch.c",
+      "files": [
+        "src/libgit2/branch.c",
+        "src/libgit2/branch.h",
+        "include/git2/branch.h",
+        {
+          "path": "include/git2/types.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_branch_t",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/submodule.c",
+      "files": [
+        "src/libgit2/submodule.c",
+        "src/libgit2/submodule.h",
+        "include/git2/submodule.h",
+        {
+          "path": "include/git2/types.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_submodule_ignore_t",
+                "kind": "type"
+              },
+              {
+                "name": "git_submodule_recurse_t",
+                "kind": "type"
+              },
+              {
+                "name": "git_submodule_update_t",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/diff_file.c",
+      "files": [
+        "src/libgit2/diff_file.c",
+        "src/libgit2/diff_file.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/email.c",
+      "files": [
+        "src/libgit2/email.c",
+        "src/libgit2/email.h",
+        "include/git2/email.h",
+        "include/git2/sys/email.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/revwalk.c",
+      "files": [
+        "src/libgit2/revwalk.c",
+        "src/libgit2/revwalk.h",
+        "include/git2/revwalk.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/commit_list.c",
+      "files": [
+        "src/libgit2/commit_list.c",
+        "src/libgit2/commit_list.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/merge.c",
+      "files": [
+        "src/libgit2/merge.c",
+        "src/libgit2/merge.h",
+        "include/git2/merge.h",
+        "include/git2/sys/merge.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/checkout.c",
+      "files": [
+        "src/libgit2/checkout.c",
+        "src/libgit2/checkout.h",
+        "include/git2/checkout.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/cherrypick.c",
+      "files": [
+        "src/libgit2/cherrypick.c",
+        "include/git2/cherrypick.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/clone.c",
+      "files": [
+        "src/libgit2/clone.c",
+        "src/libgit2/clone.h",
+        "include/git2/clone.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/graph.c",
+      "files": [
+        "src/libgit2/graph.c",
+        "include/git2/graph.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/merge_file.c",
+      "files": [
+        "src/libgit2/merge_file.c"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/merge_driver.c",
+      "files": [
+        "src/libgit2/merge_driver.c",
+        {
+          "path": "src/libgit2/merge_driver.h",
+          "items": {
+            "excluded": [
+              {
+                "name": "git_merge_driver_for_path",
+                "kind": "symbol"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/revert.c",
+      "files": [
+        "src/libgit2/revert.c",
+        "include/git2/revert.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/status.c",
+      "files": [
+        "src/libgit2/status.c",
+        "src/libgit2/status.h",
+        "include/git2/status.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/stash.c",
+      "files": [
+        "src/libgit2/stash.c",
+        "include/git2/stash.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/tag.c",
+      "files": [
+        "src/libgit2/tag.c",
+        "src/libgit2/tag.h",
+        "include/git2/tag.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/describe.c",
+      "files": [
+        "src/libgit2/describe.c",
+        "include/git2/describe.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/refdb_fs.c",
+      "files": [
+        "src/libgit2/refdb_fs.c"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/revparse.c",
+      "files": [
+        "src/libgit2/revparse.c",
+        "include/git2/revparse.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/annotated_commit.c",
+      "files": [
+        "src/libgit2/annotated_commit.c",
+        "src/libgit2/annotated_commit.h",
+        "include/git2/annotated_commit.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/mailmap.c",
+      "files": [
+        "src/libgit2/mailmap.c",
+        "src/libgit2/mailmap.h",
+        "include/git2/mailmap.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/reset.c",
+      "files": [
+        "src/libgit2/reset.c",
+        "include/git2/reset.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/rebase.c",
+      "files": [
+        "src/libgit2/rebase.c",
+        "include/git2/rebase.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/worktree.c",
+      "files": [
+        "src/libgit2/worktree.c",
+        "src/libgit2/worktree.h",
+        "include/git2/worktree.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/util/zstream.c",
+      "files": [
+        "src/util/zstream.c",
+        "src/util/zstream.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/indexer.c",
+      "files": [
+        "src/libgit2/indexer.c",
+        "src/libgit2/indexer.h",
+        {
+          "path": "include/git2/indexer.h",
+          "items": {
+            "excluded": [
+              {
+                "name": "git_indexer_hash",
+                "kind": "symbol"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/odb_loose.c",
+      "files": [
+        "src/libgit2/odb_loose.c",
+        {
+          "path": "include/git2/odb_backend.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_odb_backend_loose_flag_t",
+                "kind": "type"
+              },
+              {
+                "name": "git_odb_backend_loose_options",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/pack.c",
+      "files": [
+        "src/libgit2/pack.c",
+        "src/libgit2/pack.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/delta.c",
+      "files": [
+        "src/libgit2/delta.c",
+        "src/libgit2/delta.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/apply.c",
+      "files": [
+        "src/libgit2/apply.c",
+        "src/libgit2/apply.h",
+        "include/git2/apply.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/mwindow.c",
+      "files": [
+        "src/libgit2/mwindow.c",
+        "src/libgit2/mwindow.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/commit_graph.c",
+      "files": [
+        "src/libgit2/commit_graph.c",
+        "src/libgit2/commit_graph.h",
+        "include/git2/sys/commit_graph.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/midx.c",
+      "files": [
+        "src/libgit2/midx.c",
+        "src/libgit2/midx.h",
+        "include/git2/sys/midx.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/odb_pack.c",
+      "files": [
+        "src/libgit2/odb_pack.c",
+        {
+          "path": "include/git2/odb_backend.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_odb_backend_pack_options",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/pack-objects.c",
+      "files": [
+        "src/libgit2/pack-objects.c",
+        "src/libgit2/pack-objects.h",
+        {
+          "path": "include/git2/pack.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_packbuilder_foreach_cb",
+                "kind": "symbol"
+              },
+              {
+                "name": "git_packbuilder_progress",
+                "kind": "symbol"
+              },
+              {
+                "name": "git_packbuilder_stage_t",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/odb_mempack.c",
+      "files": [
+        "src/libgit2/odb_mempack.c"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/patch_generate.c",
+      "files": [
+        "src/libgit2/patch_generate.c",
+        "src/libgit2/patch_generate.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/blame.c",
+      "files": [
+        "src/libgit2/blame.c",
+        "src/libgit2/blame.h",
+        {
+          "path": "include/git2/blame.h",
+          "items": {
+            "excluded": [
+              {
+                "name": "git_blame_file_from_buffer",
+                "kind": "symbol"
+              },
+              {
+                "name": "git_blame_get_hunk_byindex",
+                "kind": "symbol"
+              },
+              {
+                "name": "git_blame_get_hunk_byline",
+                "kind": "symbol"
+              },
+              {
+                "name": "git_blame_get_hunk_count",
+                "kind": "symbol"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/blame_git.c",
+      "files": [
+        "src/libgit2/blame_git.c",
+        "src/libgit2/blame_git.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/diff_xdiff.c",
+      "files": [
+        "src/libgit2/diff_xdiff.c",
+        "src/libgit2/diff_xdiff.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/transport.c",
+      "files": [
+        "src/libgit2/transport.c",
+        {
+          "path": "include/git2/sys/transport.h",
+          "items": {
+            "excluded": [
+              {
+                "name": "git_transport_dummy",
+                "kind": "symbol"
+              }
+            ]
+          }
+        },
+        "include/git2/transport.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/fetch.c",
+      "files": [
+        "src/libgit2/fetch.c",
+        {
+          "path": "src/libgit2/fetch.h",
+          "items": {
+            "excluded": [
+              {
+                "name": "git_fetch_setup_walk",
+                "kind": "symbol"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/push.c",
+      "files": [
+        "src/libgit2/push.c",
+        "src/libgit2/push.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/transports/local.c",
+      "files": [
+        "src/libgit2/transports/local.c"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/transports/smart.c",
+      "files": [
+        "src/libgit2/transports/smart.c",
+        {
+          "path": "src/libgit2/transports/smart.h",
+          "items": {
+            "excluded": [
+              {
+                "name": "git_pkt",
+                "kind": "type"
+              },
+              {
+                "name": "git_pkt_ack",
+                "kind": "type"
+              },
+              {
+                "name": "git_pkt_comment",
+                "kind": "type"
+              },
+              {
+                "name": "git_pkt_data",
+                "kind": "type"
+              },
+              {
+                "name": "git_pkt_err",
+                "kind": "type"
+              },
+              {
+                "name": "git_pkt_ng",
+                "kind": "type"
+              },
+              {
+                "name": "git_pkt_ok",
+                "kind": "type"
+              },
+              {
+                "name": "git_pkt_parse_data",
+                "kind": "type"
+              },
+              {
+                "name": "git_pkt_ref",
+                "kind": "type"
+              },
+              {
+                "name": "git_pkt_send_flush",
+                "kind": "symbol"
+              },
+              {
+                "name": "git_pkt_shallow",
+                "kind": "type"
+              },
+              {
+                "name": "git_pkt_type",
+                "kind": "type"
+              },
+              {
+                "name": "git_pkt_unpack",
+                "kind": "type"
+              }
+            ]
+          }
+        },
+        {
+          "path": "include/git2/cert.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_cert",
+                "kind": "type"
+              },
+              {
+                "name": "git_cert_t",
+                "kind": "type"
+              },
+              {
+                "name": "git_transport_certificate_check_cb",
+                "kind": "symbol"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/stream.h",
+      "files": [
+        "src/libgit2/stream.h",
+        {
+          "path": "include/git2/sys/stream.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_stream",
+                "kind": "type"
+              },
+              {
+                "name": "git_stream_certificate_cb",
+                "kind": "symbol"
+              },
+              {
+                "name": "git_stream_close_cb",
+                "kind": "symbol"
+              },
+              {
+                "name": "git_stream_connect_cb",
+                "kind": "symbol"
+              },
+              {
+                "name": "git_stream_free_cb",
+                "kind": "symbol"
+              },
+              {
+                "name": "git_stream_read_cb",
+                "kind": "symbol"
+              },
+              {
+                "name": "git_stream_set_proxy_cb",
+                "kind": "symbol"
+              },
+              {
+                "name": "git_stream_write_cb",
+                "kind": "symbol"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/streams/registry.c",
+      "files": [
+        "src/libgit2/streams/registry.c",
+        "src/libgit2/streams/registry.h",
+        {
+          "path": "include/git2/sys/stream.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_stream_registration",
+                "kind": "type"
+              },
+              {
+                "name": "git_stream_t",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/streams/socket.c",
+      "files": [
+        "src/libgit2/streams/socket.c",
+        "src/libgit2/streams/socket.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/streams/openssl.c",
+      "files": [
+        "src/libgit2/streams/openssl.c",
+        "src/libgit2/streams/openssl.h",
+        {
+          "path": "include/git2/cert.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_cert_x509",
+                "kind": "type"
+              }
+            ]
+          }
+        },
+        "include/git2/sys/openssl.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/streams/tls.c",
+      "files": [
+        "src/libgit2/streams/tls.c",
+        "src/libgit2/streams/tls.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/transports/git.c",
+      "files": [
+        "src/libgit2/transports/git.c"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/transports/http.c",
+      "files": [
+        "src/libgit2/transports/http.c",
+        "src/libgit2/transports/http.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/settings.c",
+      "files": [
+        "src/libgit2/settings.c",
+        "src/libgit2/settings.h",
+        {
+          "path": "include/git2/common.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_buildinfo_t",
+                "kind": "type"
+              },
+              {
+                "name": "git_libgit2_opt_t",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/transports/httpclient.c",
+      "files": [
+        "src/libgit2/transports/httpclient.c",
+        "src/libgit2/transports/httpclient.h"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/transports/smart_pkt.c",
+      "files": [
+        "src/libgit2/transports/smart_pkt.c",
+        {
+          "path": "src/libgit2/transports/smart.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_pkt",
+                "kind": "type"
+              },
+              {
+                "name": "git_pkt_ack",
+                "kind": "type"
+              },
+              {
+                "name": "git_pkt_comment",
+                "kind": "type"
+              },
+              {
+                "name": "git_pkt_data",
+                "kind": "type"
+              },
+              {
+                "name": "git_pkt_err",
+                "kind": "type"
+              },
+              {
+                "name": "git_pkt_ng",
+                "kind": "type"
+              },
+              {
+                "name": "git_pkt_ok",
+                "kind": "type"
+              },
+              {
+                "name": "git_pkt_parse_data",
+                "kind": "type"
+              },
+              {
+                "name": "git_pkt_ref",
+                "kind": "type"
+              },
+              {
+                "name": "git_pkt_shallow",
+                "kind": "type"
+              },
+              {
+                "name": "git_pkt_type",
+                "kind": "type"
+              },
+              {
+                "name": "git_pkt_unpack",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/transports/smart_protocol.c",
+      "files": [
+        "src/libgit2/transports/smart_protocol.c"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/transports/ssh.c",
+      "files": [
+        "src/libgit2/transports/ssh.c"
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/transports/ssh_libssh2.c",
+      "files": [
+        "src/libgit2/transports/ssh_libssh2.c",
+        {
+          "path": "src/libgit2/transports/ssh_libssh2.h",
+          "items": {
+            "excluded": [
+              {
+                "name": "git_smart_subtransport_ssh_libssh2",
+                "kind": "symbol"
+              },
+              {
+                "name": "git_smart_subtransport_ssh_libssh2_set_paths",
+                "kind": "symbol"
+              }
+            ]
+          }
+        },
+        {
+          "path": "include/git2/cert.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_cert_hostkey",
+                "kind": "type"
+              },
+              {
+                "name": "git_cert_ssh_raw_type_t",
+                "kind": "type"
+              },
+              {
+                "name": "git_cert_ssh_t",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "libgit2/src/libgit2/libgit2.c",
+      "files": [
+        "src/libgit2/libgit2.c",
+        {
+          "path": "include/git2/common.h",
+          "items": {
+            "included": [
+              {
+                "name": "git_feature_t",
+                "kind": "type"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "schedule_seeds": [
     "deps/reftable/basics.c",
     "deps/reftable/basics.h",
-    "deps/reftable/block.c",
-    "deps/reftable/block.h",
-    "deps/reftable/blocksource.c",
-    "deps/reftable/blocksource.h",
-    "deps/reftable/error.c",
-    "deps/reftable/fsck.c",
-    "deps/reftable/iter.c",
-    "deps/reftable/iter.h",
-    "deps/reftable/merged.c",
-    "deps/reftable/merged.h",
-    "deps/reftable/pq.c",
-    "deps/reftable/pq.h",
-    "deps/reftable/record.c",
-    "deps/reftable/record.h",
     "deps/reftable/reftable-basics.h",
-    "deps/reftable/reftable-block.h",
-    "deps/reftable/reftable-blocksource.h",
-    "deps/reftable/reftable-error.h",
-    "deps/reftable/reftable-fsck.h",
-    "deps/reftable/reftable-iterator.h",
-    "deps/reftable/reftable-merged.h",
-    "deps/reftable/reftable-record.h",
-    "deps/reftable/reftable-stack.h",
-    "deps/reftable/reftable-table.h",
-    "deps/reftable/reftable-writer.h",
-    "deps/reftable/stack.c",
-    "deps/reftable/stack.h",
-    "deps/reftable/system.c",
-    "deps/reftable/system.h",
-    "deps/reftable/table.c",
-    "deps/reftable/table.h",
-    "deps/reftable/tree.c",
-    "deps/reftable/tree.h",
-    "deps/reftable/writer.c",
-    "deps/reftable/writer.h",
-    "deps/xdiff/git-xdiff.h",
-    "deps/xdiff/xdiff.h",
-    "deps/xdiff/xdiffi.c",
-    "deps/xdiff/xdiffi.h",
-    "deps/xdiff/xemit.c",
-    "deps/xdiff/xemit.h",
-    "deps/xdiff/xhistogram.c",
-    "deps/xdiff/xmerge.c",
-    "deps/xdiff/xpatience.c",
-    "deps/xdiff/xprepare.c",
-    "deps/xdiff/xprepare.h",
-    "deps/xdiff/xtypes.h",
-    "deps/xdiff/xutils.c",
-    "deps/xdiff/xutils.h",
-    "src/libgit2/annotated_commit.c",
-    "src/libgit2/annotated_commit.h",
-    "src/libgit2/apply.c",
-    "src/libgit2/apply.h",
-    "src/libgit2/attr.c",
-    "src/libgit2/attr_file.c",
-    "src/libgit2/attr_file.h",
-    "src/libgit2/attrcache.c",
-    "src/libgit2/attrcache.h",
-    "src/libgit2/blame.c",
-    "src/libgit2/blame.h",
-    "src/libgit2/blame_git.c",
-    "src/libgit2/blame_git.h",
-    "src/libgit2/blob.c",
-    "src/libgit2/blob.h",
-    "src/libgit2/branch.c",
-    "src/libgit2/branch.h",
-    "src/libgit2/buf.c",
-    "src/libgit2/buf.h",
-    "src/libgit2/cache.c",
-    "src/libgit2/cache.h",
-    "src/libgit2/checkout.c",
-    "src/libgit2/checkout.h",
-    "src/libgit2/cherrypick.c",
-    "src/libgit2/clone.c",
-    "src/libgit2/clone.h",
-    "src/libgit2/commit.c",
-    "src/libgit2/commit.h",
-    "src/libgit2/commit_graph.c",
-    "src/libgit2/commit_graph.h",
-    "src/libgit2/commit_list.c",
-    "src/libgit2/commit_list.h",
-    "src/libgit2/common.h",
-    "src/libgit2/config.c",
-    "src/libgit2/config.h",
-    "src/libgit2/config_backend.h",
-    "src/libgit2/config_cache.c",
-    "src/libgit2/config_file.c",
-    "src/libgit2/config_list.c",
-    "src/libgit2/config_list.h",
-    "src/libgit2/config_mem.c",
-    "src/libgit2/config_parse.c",
-    "src/libgit2/config_parse.h",
-    "src/libgit2/config_snapshot.c",
-    "src/libgit2/crlf.c",
-    "src/libgit2/delta.c",
-    "src/libgit2/delta.h",
-    "src/libgit2/describe.c",
-    "src/libgit2/diff.c",
-    "src/libgit2/diff.h",
-    "src/libgit2/diff_driver.c",
-    "src/libgit2/diff_driver.h",
-    "src/libgit2/diff_file.c",
-    "src/libgit2/diff_file.h",
-    "src/libgit2/diff_generate.c",
-    "src/libgit2/diff_generate.h",
-    "src/libgit2/diff_parse.c",
-    "src/libgit2/diff_parse.h",
-    "src/libgit2/diff_print.c",
-    "src/libgit2/diff_stats.c",
-    "src/libgit2/diff_stats.h",
-    "src/libgit2/diff_tform.c",
-    "src/libgit2/diff_tform.h",
-    "src/libgit2/diff_xdiff.c",
-    "src/libgit2/diff_xdiff.h",
-    "src/libgit2/email.c",
-    "src/libgit2/email.h",
-    "src/libgit2/fetch.c",
-    "src/libgit2/fetch.h",
-    "src/libgit2/fetchhead.c",
-    "src/libgit2/fetchhead.h",
-    "src/libgit2/filter.c",
-    "src/libgit2/filter.h",
-    "src/libgit2/grafts.c",
-    "src/libgit2/grafts.h",
-    "src/libgit2/graph.c",
-    "src/libgit2/hashmap_oid.h",
-    "src/libgit2/hashsig.c",
-    "src/libgit2/ident.c",
-    "src/libgit2/ignore.c",
-    "src/libgit2/ignore.h",
-    "src/libgit2/index.c",
-    "src/libgit2/index.h",
-    "src/libgit2/index_map.c",
-    "src/libgit2/index_map.h",
-    "src/libgit2/indexer.c",
-    "src/libgit2/indexer.h",
-    "src/libgit2/iterator.c",
-    "src/libgit2/iterator.h",
-    "src/libgit2/libgit2.c",
-    "src/libgit2/mailmap.c",
-    "src/libgit2/mailmap.h",
-    "src/libgit2/merge.c",
-    "src/libgit2/merge.h",
-    "src/libgit2/merge_driver.c",
-    "src/libgit2/merge_driver.h",
-    "src/libgit2/merge_file.c",
-    "src/libgit2/message.c",
-    "src/libgit2/midx.c",
-    "src/libgit2/midx.h",
-    "src/libgit2/mwindow.c",
-    "src/libgit2/mwindow.h",
-    "src/libgit2/notes.c",
-    "src/libgit2/notes.h",
-    "src/libgit2/object.c",
-    "src/libgit2/object.h",
-    "src/libgit2/object_api.c",
-    "src/libgit2/odb.c",
-    "src/libgit2/odb.h",
-    "src/libgit2/odb_loose.c",
-    "src/libgit2/odb_mempack.c",
-    "src/libgit2/odb_pack.c",
-    "src/libgit2/oid.c",
-    "src/libgit2/oid.h",
-    "src/libgit2/oidarray.c",
-    "src/libgit2/oidarray.h",
-    "src/libgit2/pack-objects.c",
-    "src/libgit2/pack-objects.h",
-    "src/libgit2/pack.c",
-    "src/libgit2/pack.h",
-    "src/libgit2/parse.c",
-    "src/libgit2/parse.h",
-    "src/libgit2/patch.c",
-    "src/libgit2/patch.h",
-    "src/libgit2/patch_generate.c",
-    "src/libgit2/patch_generate.h",
-    "src/libgit2/patch_parse.c",
-    "src/libgit2/patch_parse.h",
-    "src/libgit2/path.c",
-    "src/libgit2/path.h",
-    "src/libgit2/pathspec.c",
-    "src/libgit2/pathspec.h",
-    "src/libgit2/proxy.c",
-    "src/libgit2/proxy.h",
-    "src/libgit2/push.c",
-    "src/libgit2/push.h",
-    "src/libgit2/reader.c",
-    "src/libgit2/reader.h",
-    "src/libgit2/rebase.c",
-    "src/libgit2/refdb.c",
-    "src/libgit2/refdb.h",
-    "src/libgit2/refdb_fs.c",
-    "src/libgit2/refdb_reftable.c",
-    "src/libgit2/refdb_reftable.h",
-    "src/libgit2/reflog.c",
-    "src/libgit2/reflog.h",
-    "src/libgit2/refs.c",
-    "src/libgit2/refs.h",
-    "src/libgit2/refspec.c",
-    "src/libgit2/refspec.h",
-    "src/libgit2/remote.c",
-    "src/libgit2/remote.h",
-    "src/libgit2/repo_template.h",
-    "src/libgit2/repository.c",
-    "src/libgit2/repository.h",
-    "src/libgit2/reset.c",
-    "src/libgit2/revert.c",
-    "src/libgit2/revparse.c",
-    "src/libgit2/revwalk.c",
-    "src/libgit2/revwalk.h",
-    "src/libgit2/settings.c",
-    "src/libgit2/settings.h",
-    "src/libgit2/signature.c",
-    "src/libgit2/signature.h",
-    "src/libgit2/stash.c",
-    "src/libgit2/status.c",
-    "src/libgit2/status.h",
-    "src/libgit2/strarray.c",
-    "src/libgit2/strarray.h",
-    "src/libgit2/stream.h",
-    "src/libgit2/streams/mbedtls.c",
-    "src/libgit2/streams/mbedtls.h",
-    "src/libgit2/streams/openssl.c",
-    "src/libgit2/streams/openssl.h",
-    "src/libgit2/streams/registry.c",
-    "src/libgit2/streams/registry.h",
-    "src/libgit2/streams/socket.c",
-    "src/libgit2/streams/socket.h",
-    "src/libgit2/streams/tls.c",
-    "src/libgit2/streams/tls.h",
-    "src/libgit2/submodule.c",
-    "src/libgit2/submodule.h",
-    "src/libgit2/sysdir.c",
-    "src/libgit2/sysdir.h",
-    "src/libgit2/tag.c",
-    "src/libgit2/tag.h",
-    "src/libgit2/trace.c",
-    "src/libgit2/trace.h",
-    "src/libgit2/trailer.c",
-    "src/libgit2/transaction.c",
-    "src/libgit2/transaction.h",
-    "src/libgit2/transport.c",
-    "src/libgit2/transports/auth.c",
-    "src/libgit2/transports/auth.h",
-    "src/libgit2/transports/auth_ntlm.h",
-    "src/libgit2/transports/auth_ntlmclient.c",
-    "src/libgit2/transports/credential.c",
-    "src/libgit2/transports/credential_helpers.c",
-    "src/libgit2/transports/git.c",
-    "src/libgit2/transports/http.c",
-    "src/libgit2/transports/http.h",
-    "src/libgit2/transports/httpclient.c",
-    "src/libgit2/transports/httpclient.h",
-    "src/libgit2/transports/httpparser.c",
-    "src/libgit2/transports/httpparser.h",
-    "src/libgit2/transports/local.c",
-    "src/libgit2/transports/smart.c",
-    "src/libgit2/transports/smart.h",
-    "src/libgit2/transports/smart_pkt.c",
-    "src/libgit2/transports/smart_protocol.c",
-    "src/libgit2/transports/ssh.c",
-    "src/libgit2/transports/ssh_libssh2.c",
-    "src/libgit2/transports/ssh_libssh2.h",
-    "src/libgit2/tree-cache.c",
-    "src/libgit2/tree-cache.h",
-    "src/libgit2/tree.c",
-    "src/libgit2/tree.h",
-    "src/libgit2/userdiff.h",
-    "src/libgit2/worktree.c",
-    "src/libgit2/worktree.h",
-    "src/util/alloc.c",
-    "src/util/alloc.h",
-    "src/util/allocators/debugalloc.c",
-    "src/util/allocators/debugalloc.h",
     "src/util/allocators/failalloc.c",
     "src/util/allocators/failalloc.h",
+    "src/util/alloc.c",
+    "src/util/alloc.h",
+    {
+      "path": "include/git2/sys/alloc.h",
+      "items": {
+        "excluded": [
+          {
+            "name": "git_win32_crtdbg_init_allocator",
+            "kind": "symbol"
+          }
+        ]
+      }
+    },
+    "src/util/allocators/debugalloc.c",
+    "src/util/allocators/debugalloc.h",
     "src/util/allocators/stdalloc.c",
     "src/util/allocators/stdalloc.h",
     "src/util/allocators/win32_leakcheck.c",
     "src/util/allocators/win32_leakcheck.h",
-    "src/util/array.h",
+    "src/util/strlist.c",
+    "src/util/strlist.h",
+    "deps/llhttp/llhttp.c",
+    {
+      "path": "deps/llhttp/llhttp.h",
+      "items": {
+        "excluded": [
+          {
+            "name": "llhttp_alloc",
+            "kind": "symbol"
+          },
+          {
+            "name": "llhttp_free",
+            "kind": "symbol"
+          },
+          {
+            "name": "llhttp_settings_s",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "deps/llhttp/api.c",
+    {
+      "path": "deps/llhttp/llhttp.h",
+      "items": {
+        "included": [
+          {
+            "name": "llhttp_finish",
+            "kind": "type"
+          },
+          {
+            "name": "llhttp_settings_s",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "deps/llhttp/http.c",
+    {
+      "path": "deps/ntlmclient/utf8.h",
+      "items": {
+        "excluded": [
+          {
+            "name": "utf8coll",
+            "kind": "symbol"
+          },
+          {
+            "name": "utf8fry",
+            "kind": "symbol"
+          }
+        ]
+      }
+    },
+    "deps/ntlmclient/util.c",
+    "deps/ntlmclient/util.h",
+    "deps/ntlmclient/ntlm.c",
+    "deps/ntlmclient/ntlm.h",
+    {
+      "path": "deps/ntlmclient/ntlmclient.h",
+      "items": {
+        "included": [
+          {
+            "name": "ntlm_client_flags",
+            "kind": "type"
+          },
+          {
+            "name": "ntlm_error_code",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "deps/ntlmclient/crypt_openssl.c",
+    "deps/ntlmclient/crypt_openssl.h",
+    "deps/ntlmclient/unicode_builtin.c",
+    "deps/ntlmclient/unicode_builtin.h",
+    "deps/reftable/error.c",
+    "deps/reftable/reftable-error.h",
+    "deps/reftable/record.c",
+    "deps/reftable/record.h",
+    "deps/reftable/reftable-record.h",
+    "deps/reftable/pq.c",
+    "deps/reftable/pq.h",
+    "deps/reftable/tree.c",
+    "deps/reftable/tree.h",
+    "deps/xdiff/xutils.c",
+    {
+      "path": "deps/xdiff/xdiff.h",
+      "items": {
+        "included": [
+          {
+            "name": "s_mmbuffer",
+            "kind": "type"
+          },
+          {
+            "name": "s_mmfile",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    {
+      "path": "deps/xdiff/xtypes.h",
+      "items": {
+        "included": [
+          {
+            "name": "s_chanode",
+            "kind": "type"
+          },
+          {
+            "name": "s_chastore",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "deps/xdiff/xutils.h",
+    "deps/xdiff/xprepare.c",
+    "deps/xdiff/xprepare.h",
+    {
+      "path": "deps/xdiff/xtypes.h",
+      "items": {
+        "included": [
+          {
+            "name": "s_xdfenv",
+            "kind": "type"
+          },
+          {
+            "name": "s_xdfile",
+            "kind": "type"
+          },
+          {
+            "name": "s_xrecord",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    {
+      "path": "src/libgit2/common.h",
+      "items": {
+        "excluded": [
+          {
+            "name": "git_error__check_version",
+            "kind": "symbol"
+          }
+        ]
+      }
+    },
+    "src/libgit2/streams/mbedtls.c",
+    "src/libgit2/streams/mbedtls.h",
+    "src/libgit2/transports/httpparser.c",
+    "src/libgit2/transports/httpparser.h",
     "src/util/bitvec.h",
-    "src/util/date.c",
-    "src/util/date.h",
+    "src/util/hash/sha1dc/ubc_check.c",
+    "src/util/hash/sha1dc/ubc_check.h",
+    "src/util/hash/sha1dc/sha1.c",
+    "src/util/hash/sha1dc/sha1.h",
+    "src/util/integer.h",
+    "src/util/staticstr.h",
+    "src/util/thread.c",
+    "src/util/thread.h",
+    {
+      "path": "src/util/unix/pthread.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_thread",
+            "kind": "type"
+          },
+          {
+            "name": "git_threads_global_init",
+            "kind": "symbol"
+          }
+        ]
+      }
+    },
     "src/util/errors.c",
+    {
+      "path": "src/libgit2/common.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_error__check_version",
+            "kind": "symbol"
+          }
+        ]
+      }
+    },
     "src/util/errors.h",
-    "src/util/filebuf.c",
-    "src/util/filebuf.h",
-    "src/util/fs_path.c",
-    "src/util/fs_path.h",
-    "src/util/futils.c",
-    "src/util/futils.h",
-    "src/util/git2_util.h",
-    "src/util/hash.c",
-    "src/util/hash.h",
+    "include/git2/errors.h",
+    "include/git2/sys/errors.h",
+    "src/libgit2/proxy.c",
+    "src/libgit2/proxy.h",
+    "include/git2/proxy.h",
+    "src/libgit2/strarray.c",
+    "src/libgit2/strarray.h",
+    "include/git2/strarray.h",
+    "src/util/array.h",
     "src/util/hash/collisiondetect.c",
     "src/util/hash/collisiondetect.h",
     "src/util/hash/openssl.c",
     "src/util/hash/openssl.h",
-    "src/util/hash/sha.h",
-    "src/util/hash/sha1dc/sha1.c",
-    "src/util/hash/sha1dc/sha1.h",
-    "src/util/hash/sha1dc/ubc_check.c",
-    "src/util/hash/sha1dc/ubc_check.h",
+    "src/util/hash.c",
+    "src/util/hash.h",
     "src/util/hashmap_str.h",
-    "src/util/integer.h",
-    "src/util/map.h",
-    "src/util/net.c",
-    "src/util/net.h",
-    "src/util/pool.c",
-    "src/util/pool.h",
-    "src/util/posix.c",
-    "src/util/posix.h",
-    "src/util/pqueue.c",
-    "src/util/pqueue.h",
-    "src/util/process.h",
-    "src/util/rand.c",
-    "src/util/rand.h",
     "src/util/regexp.c",
+    {
+      "path": "deps/xdiff/git-xdiff.h",
+      "items": {
+        "included": [
+          {
+            "name": "xdl_regexec_buf",
+            "kind": "symbol"
+          }
+        ]
+      }
+    },
     "src/util/regexp.h",
+    "deps/xdiff/xdiffi.c",
+    {
+      "path": "deps/xdiff/xdiff.h",
+      "items": {
+        "included": [
+          {
+            "name": "s_bdiffparam",
+            "kind": "type"
+          },
+          {
+            "name": "s_xpparam",
+            "kind": "type"
+          },
+          {
+            "name": "xdl_emit_hunk_consume_func_t",
+            "kind": "symbol"
+          }
+        ]
+      }
+    },
+    "deps/xdiff/xdiffi.h",
+    "deps/xdiff/xemit.c",
+    {
+      "path": "deps/xdiff/xdiff.h",
+      "items": {
+        "included": [
+          {
+            "name": "find_func_t",
+            "kind": "symbol"
+          },
+          {
+            "name": "s_xdemitcb",
+            "kind": "type"
+          },
+          {
+            "name": "s_xdemitconf",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "deps/xdiff/xemit.h",
+    "deps/xdiff/xhistogram.c",
+    "deps/xdiff/xmerge.c",
+    {
+      "path": "deps/xdiff/xdiff.h",
+      "items": {
+        "included": [
+          {
+            "name": "s_xmparam",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "deps/xdiff/xpatience.c",
     "src/util/runtime.c",
     "src/util/runtime.h",
-    "src/util/sortedcache.c",
-    "src/util/sortedcache.h",
-    "src/util/staticstr.h",
     "src/util/str.c",
     "src/util/str.h",
-    "src/util/strlist.c",
-    "src/util/strlist.h",
-    "src/util/thread.c",
-    "src/util/thread.h",
-    "src/util/tsort.c",
+    "src/libgit2/buf.c",
+    "src/libgit2/buf.h",
+    {
+      "path": "include/git2/buffer.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_buf",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/message.c",
+    {
+      "path": "include/git2/message.h",
+      "items": {
+        "excluded": [
+          {
+            "name": "git_message_trailer",
+            "kind": "type"
+          },
+          {
+            "name": "git_message_trailer_array",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/trace.c",
+    "src/libgit2/trace.h",
+    "include/git2/trace.h",
+    "src/util/date.c",
+    "src/util/date.h",
     "src/util/unix/map.c",
-    "src/util/unix/posix.h",
-    "src/util/unix/process.c",
-    "src/util/unix/pthread.h",
+    "src/util/map.h",
+    "src/util/pool.c",
+    "src/util/pool.h",
     "src/util/unix/realpath.c",
     "src/util/utf8.c",
     "src/util/utf8.h",
     "src/util/util.c",
     "src/util/util.h",
+    "src/libgit2/oid.c",
+    {
+      "path": "src/libgit2/hashmap_oid.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_hashmap_oid_hashcode",
+            "kind": "symbol"
+          }
+        ]
+      }
+    },
+    "src/libgit2/oid.h",
+    {
+      "path": "include/git2/oid.h",
+      "items": {
+        "excluded": [
+          {
+            "name": "git_oid_fromraw",
+            "kind": "symbol"
+          },
+          {
+            "name": "git_oid_fromstr",
+            "kind": "symbol"
+          },
+          {
+            "name": "git_oid_fromstrn",
+            "kind": "symbol"
+          },
+          {
+            "name": "git_oid_fromstrp",
+            "kind": "symbol"
+          }
+        ]
+      }
+    },
+    "src/libgit2/oidarray.c",
+    "src/libgit2/oidarray.h",
+    "include/git2/oidarray.h",
+    "src/libgit2/parse.c",
+    "src/libgit2/parse.h",
+    "src/libgit2/config_parse.c",
+    "src/libgit2/config_parse.h",
+    "src/libgit2/trailer.c",
+    {
+      "path": "include/git2/message.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_message_trailer",
+            "kind": "type"
+          },
+          {
+            "name": "git_message_trailer_array",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/transports/credential.c",
+    "include/git2/credential.h",
+    "include/git2/sys/credential.h",
+    "src/libgit2/transports/credential_helpers.c",
+    "include/git2/credential_helpers.h",
+    "src/util/net.c",
+    "src/util/net.h",
+    "src/libgit2/transports/auth.c",
+    "src/libgit2/transports/auth.h",
+    "src/libgit2/transports/auth_ntlmclient.c",
+    "src/util/rand.c",
+    "src/util/rand.h",
+    "src/util/tsort.c",
     "src/util/varint.c",
     "src/util/varint.h",
     "src/util/vector.c",
     "src/util/vector.h",
+    "src/util/fs_path.c",
+    "src/util/fs_path.h",
+    "src/libgit2/sysdir.c",
+    "src/libgit2/sysdir.h",
+    "src/util/posix.c",
+    {
+      "path": "src/util/posix.h",
+      "items": {
+        "excluded": [
+          {
+            "name": "p_pread",
+            "kind": "symbol"
+          },
+          {
+            "name": "p_pwrite",
+            "kind": "symbol"
+          }
+        ]
+      }
+    },
+    "src/util/unix/posix.h",
+    "deps/reftable/system.c",
+    "deps/reftable/system.h",
+    "deps/reftable/blocksource.c",
+    "deps/reftable/blocksource.h",
+    "deps/reftable/reftable-blocksource.h",
+    "deps/reftable/block.c",
+    "deps/reftable/block.h",
+    "deps/reftable/reftable-block.h",
+    "deps/reftable/iter.c",
+    "deps/reftable/iter.h",
+    "deps/reftable/reftable-iterator.h",
+    "deps/reftable/table.c",
+    "deps/reftable/reftable-table.h",
+    "deps/reftable/table.h",
+    "deps/reftable/merged.c",
+    "deps/reftable/merged.h",
+    "deps/reftable/reftable-merged.h",
+    "deps/reftable/writer.c",
+    "deps/reftable/reftable-writer.h",
+    "deps/reftable/writer.h",
+    "deps/reftable/stack.c",
+    "deps/reftable/reftable-stack.h",
+    "deps/reftable/stack.h",
+    "deps/reftable/fsck.c",
+    "deps/reftable/reftable-fsck.h",
+    "src/util/futils.c",
+    "src/util/futils.h",
+    "src/libgit2/grafts.c",
+    "src/libgit2/grafts.h",
+    "src/libgit2/hashsig.c",
+    "include/git2/sys/hashsig.h",
+    "src/util/filebuf.c",
+    "src/util/filebuf.h",
+    "src/libgit2/repository.c",
+    {
+      "path": "src/libgit2/repo_template.h",
+      "items": {
+        "included": [
+          {
+            "name": "repo_template",
+            "kind": "symbol"
+          },
+          {
+            "name": "repo_template_item",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/repository.h",
+    "include/git2/repository.h",
+    "include/git2/sys/repository.h",
+    "src/libgit2/config.c",
+    {
+      "path": "src/libgit2/config.h",
+      "items": {
+        "excluded": [
+          {
+            "name": "git_config__find_programdata",
+            "kind": "symbol"
+          }
+        ]
+      }
+    },
+    {
+      "path": "src/libgit2/config_backend.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_config_backend_delete",
+            "kind": "symbol"
+          },
+          {
+            "name": "git_config_backend_foreach",
+            "kind": "symbol"
+          },
+          {
+            "name": "git_config_backend_free",
+            "kind": "symbol"
+          },
+          {
+            "name": "git_config_backend_get_string",
+            "kind": "symbol"
+          },
+          {
+            "name": "git_config_backend_lock",
+            "kind": "symbol"
+          },
+          {
+            "name": "git_config_backend_open",
+            "kind": "symbol"
+          },
+          {
+            "name": "git_config_backend_set_string",
+            "kind": "symbol"
+          },
+          {
+            "name": "git_config_backend_unlock",
+            "kind": "symbol"
+          }
+        ]
+      }
+    },
+    "include/git2/config.h",
+    {
+      "path": "include/git2/sys/config.h",
+      "items": {
+        "excluded": [
+          {
+            "name": "git_config_backend_memory_options",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/config_cache.c",
+    "src/libgit2/config_list.c",
+    "src/libgit2/config_list.h",
+    "src/libgit2/config_snapshot.c",
+    "src/libgit2/config_mem.c",
+    {
+      "path": "include/git2/sys/config.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_config_backend_memory_options",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/fetchhead.c",
+    "src/libgit2/fetchhead.h",
+    "src/libgit2/object.c",
+    {
+      "path": "src/libgit2/object.h",
+      "items": {
+        "excluded": [
+          {
+            "name": "git_object__resolve_to_type",
+            "kind": "symbol"
+          }
+        ]
+      }
+    },
+    "include/git2/object.h",
+    {
+      "path": "include/git2/types.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_object_t",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/object_api.c",
+    "src/libgit2/odb.c",
+    "src/libgit2/odb.h",
+    "include/git2/odb.h",
+    {
+      "path": "include/git2/odb_backend.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_odb_stream",
+            "kind": "type"
+          },
+          {
+            "name": "git_odb_stream_t",
+            "kind": "type"
+          },
+          {
+            "name": "git_odb_writepack",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    {
+      "path": "include/git2/sys/odb_backend.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_odb_backend",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/blob.c",
+    "src/libgit2/blob.h",
+    "include/git2/blob.h",
+    "src/libgit2/cache.c",
+    "src/libgit2/cache.h",
+    "src/libgit2/path.c",
+    "src/libgit2/path.h",
+    "include/git2/sys/path.h",
+    "src/libgit2/refs.c",
+    "src/libgit2/refs.h",
+    "include/git2/refs.h",
+    "include/git2/sys/refs.h",
+    {
+      "path": "include/git2/types.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_reference_t",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/index.c",
+    "src/libgit2/index.h",
+    {
+      "path": "include/git2/index.h",
+      "items": {
+        "excluded": [
+          {
+            "name": "git_index_checksum",
+            "kind": "symbol"
+          }
+        ]
+      }
+    },
+    "include/git2/sys/index.h",
+    "src/libgit2/diff.c",
+    "src/libgit2/diff.h",
+    {
+      "path": "include/git2/diff.h",
+      "items": {
+        "excluded": [
+          {
+            "name": "git_diff_parse_options",
+            "kind": "type"
+          },
+          {
+            "name": "git_diff_stats_format_t",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "include/git2/sys/diff.h",
+    "src/libgit2/index_map.c",
+    "src/libgit2/index_map.h",
+    "src/libgit2/patch.c",
+    {
+      "path": "src/libgit2/patch.h",
+      "items": {
+        "excluded": [
+          {
+            "name": "git_patch_options",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "include/git2/patch.h",
+    "src/libgit2/diff_print.c",
+    "src/libgit2/diff_stats.c",
+    "src/libgit2/diff_stats.h",
+    {
+      "path": "include/git2/diff.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_diff_stats_format_t",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/patch_parse.c",
+    {
+      "path": "src/libgit2/patch.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_patch_options",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/patch_parse.h",
+    "src/libgit2/diff_parse.c",
+    "src/libgit2/diff_parse.h",
+    {
+      "path": "include/git2/diff.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_diff_parse_options",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/refdb.c",
+    {
+      "path": "src/libgit2/refdb.h",
+      "items": {
+        "excluded": [
+          {
+            "name": "git_refdb_reflog_write",
+            "kind": "symbol"
+          }
+        ]
+      }
+    },
+    "include/git2/refdb.h",
+    {
+      "path": "include/git2/sys/refdb_backend.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_refdb_backend",
+            "kind": "type"
+          },
+          {
+            "name": "git_refdb_backend_init_flag_t",
+            "kind": "type"
+          },
+          {
+            "name": "git_reference_iterator",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/remote.c",
+    "src/libgit2/remote.h",
+    {
+      "path": "include/git2/net.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_direction",
+            "kind": "type"
+          },
+          {
+            "name": "git_remote_head",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    {
+      "path": "include/git2/remote.h",
+      "items": {
+        "excluded": [
+          {
+            "name": "git_url_resolve_cb",
+            "kind": "symbol"
+          }
+        ]
+      }
+    },
+    "include/git2/sys/remote.h",
+    "src/libgit2/signature.c",
+    "src/libgit2/signature.h",
+    "include/git2/signature.h",
+    {
+      "path": "include/git2/types.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_signature",
+            "kind": "type"
+          },
+          {
+            "name": "git_time",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/reflog.c",
+    "src/libgit2/reflog.h",
+    "include/git2/reflog.h",
+    "src/libgit2/transaction.c",
+    "src/libgit2/transaction.h",
+    "include/git2/transaction.h",
+    "src/libgit2/tree.c",
+    "src/libgit2/tree.h",
+    "include/git2/tree.h",
+    {
+      "path": "include/git2/types.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_filemode_t",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/commit.c",
+    "src/libgit2/commit.h",
+    "include/git2/commit.h",
+    "include/git2/sys/commit.h",
+    "src/libgit2/tree-cache.c",
+    {
+      "path": "src/libgit2/tree-cache.h",
+      "items": {
+        "excluded": [
+          {
+            "name": "git_tree_cache_free",
+            "kind": "symbol"
+          }
+        ]
+      }
+    },
+    "src/util/pqueue.c",
+    "src/util/pqueue.h",
+    "src/util/sortedcache.c",
+    "src/util/sortedcache.h",
+    "src/util/unix/process.c",
+    "src/util/process.h",
     "src/util/wildmatch.c",
     "src/util/wildmatch.h",
-    "src/util/zstream.c",
-    "src/util/zstream.h"
-  ],
-  "api_headers": [
-    "include/git2/annotated_commit.h",
-    "include/git2/apply.h",
+    "src/libgit2/attr_file.c",
+    "src/libgit2/attr_file.h",
+    "src/libgit2/attr.c",
     "include/git2/attr.h",
-    "include/git2/blame.h",
-    "include/git2/blob.h",
-    "include/git2/branch.h",
-    "include/git2/buffer.h",
-    "include/git2/cert.h",
-    "include/git2/checkout.h",
-    "include/git2/cherrypick.h",
-    "include/git2/clone.h",
-    "include/git2/commit.h",
-    "include/git2/common.h",
-    "include/git2/config.h",
-    "include/git2/credential.h",
-    "include/git2/credential_helpers.h",
-    "include/git2/describe.h",
-    "include/git2/diff.h",
-    "include/git2/email.h",
-    "include/git2/errors.h",
+    "src/libgit2/attrcache.c",
+    "src/libgit2/attrcache.h",
+    "src/libgit2/config_file.c",
+    "src/libgit2/diff_driver.c",
+    "src/libgit2/diff_driver.h",
+    {
+      "path": "src/libgit2/userdiff.h",
+      "items": {
+        "included": [
+          {
+            "name": "builtin_defs",
+            "kind": "symbol"
+          },
+          {
+            "name": "git_diff_driver_definition",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/filter.c",
+    "src/libgit2/filter.h",
     "include/git2/filter.h",
-    "include/git2/global.h",
-    "include/git2/graph.h",
-    "include/git2/ignore.h",
-    "include/git2/index.h",
-    "include/git2/indexer.h",
-    "include/git2/mailmap.h",
-    "include/git2/merge.h",
-    "include/git2/message.h",
-    "include/git2/net.h",
-    "include/git2/notes.h",
-    "include/git2/object.h",
-    "include/git2/odb.h",
-    "include/git2/odb_backend.h",
-    "include/git2/oid.h",
-    "include/git2/oidarray.h",
-    "include/git2/pack.h",
-    "include/git2/patch.h",
-    "include/git2/pathspec.h",
-    "include/git2/proxy.h",
-    "include/git2/rebase.h",
-    "include/git2/refdb.h",
-    "include/git2/reflog.h",
-    "include/git2/refs.h",
-    "include/git2/refspec.h",
-    "include/git2/remote.h",
-    "include/git2/repository.h",
-    "include/git2/reset.h",
-    "include/git2/revert.h",
-    "include/git2/revparse.h",
-    "include/git2/revwalk.h",
-    "include/git2/signature.h",
-    "include/git2/stash.h",
-    "include/git2/status.h",
-    "include/git2/strarray.h",
-    "include/git2/submodule.h",
-    "include/git2/sys/alloc.h",
-    "include/git2/sys/commit.h",
-    "include/git2/sys/commit_graph.h",
-    "include/git2/sys/config.h",
-    "include/git2/sys/credential.h",
-    "include/git2/sys/diff.h",
-    "include/git2/sys/email.h",
-    "include/git2/sys/errors.h",
     "include/git2/sys/filter.h",
-    "include/git2/sys/hashsig.h",
-    "include/git2/sys/index.h",
-    "include/git2/sys/mempack.h",
+    {
+      "path": "include/git2/types.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_writestream",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/crlf.c",
+    "src/libgit2/ident.c",
+    "src/libgit2/ignore.c",
+    "src/libgit2/ignore.h",
+    "include/git2/ignore.h",
+    "src/libgit2/iterator.c",
+    "src/libgit2/iterator.h",
+    "src/libgit2/diff_generate.c",
+    "src/libgit2/diff_generate.h",
+    "src/libgit2/diff_tform.c",
+    "src/libgit2/diff_tform.h",
+    "src/libgit2/notes.c",
+    "src/libgit2/notes.h",
+    "include/git2/notes.h",
+    "src/libgit2/pathspec.c",
+    "src/libgit2/pathspec.h",
+    "include/git2/pathspec.h",
+    "src/libgit2/reader.c",
+    "src/libgit2/reader.h",
+    "src/libgit2/refdb_reftable.c",
+    "src/libgit2/refdb_reftable.h",
+    "src/libgit2/refspec.c",
+    "src/libgit2/refspec.h",
+    "include/git2/refspec.h",
+    "src/libgit2/branch.c",
+    "src/libgit2/branch.h",
+    "include/git2/branch.h",
+    {
+      "path": "include/git2/types.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_branch_t",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/submodule.c",
+    "src/libgit2/submodule.h",
+    "include/git2/submodule.h",
+    {
+      "path": "include/git2/types.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_submodule_ignore_t",
+            "kind": "type"
+          },
+          {
+            "name": "git_submodule_recurse_t",
+            "kind": "type"
+          },
+          {
+            "name": "git_submodule_update_t",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/diff_file.c",
+    "src/libgit2/diff_file.h",
+    "src/libgit2/email.c",
+    "src/libgit2/email.h",
+    "include/git2/email.h",
+    "include/git2/sys/email.h",
+    "src/libgit2/revwalk.c",
+    "src/libgit2/revwalk.h",
+    "include/git2/revwalk.h",
+    "src/libgit2/commit_list.c",
+    "src/libgit2/commit_list.h",
+    "src/libgit2/merge.c",
+    "src/libgit2/merge.h",
+    "include/git2/merge.h",
     "include/git2/sys/merge.h",
-    "include/git2/sys/midx.h",
-    "include/git2/sys/odb_backend.h",
-    "include/git2/sys/openssl.h",
-    "include/git2/sys/path.h",
-    "include/git2/sys/refdb_backend.h",
-    "include/git2/sys/refs.h",
-    "include/git2/sys/remote.h",
-    "include/git2/sys/repository.h",
-    "include/git2/sys/stream.h",
-    "include/git2/sys/transport.h",
+    "src/libgit2/checkout.c",
+    "src/libgit2/checkout.h",
+    "include/git2/checkout.h",
+    "src/libgit2/cherrypick.c",
+    "include/git2/cherrypick.h",
+    "src/libgit2/clone.c",
+    "src/libgit2/clone.h",
+    "include/git2/clone.h",
+    "src/libgit2/graph.c",
+    "include/git2/graph.h",
+    "src/libgit2/merge_file.c",
+    "src/libgit2/merge_driver.c",
+    {
+      "path": "src/libgit2/merge_driver.h",
+      "items": {
+        "excluded": [
+          {
+            "name": "git_merge_driver_for_path",
+            "kind": "symbol"
+          }
+        ]
+      }
+    },
+    "src/libgit2/revert.c",
+    "include/git2/revert.h",
+    "src/libgit2/status.c",
+    "src/libgit2/status.h",
+    "include/git2/status.h",
+    "src/libgit2/stash.c",
+    "include/git2/stash.h",
+    "src/libgit2/tag.c",
+    "src/libgit2/tag.h",
     "include/git2/tag.h",
-    "include/git2/trace.h",
-    "include/git2/transaction.h",
+    "src/libgit2/describe.c",
+    "include/git2/describe.h",
+    "src/libgit2/refdb_fs.c",
+    "src/libgit2/revparse.c",
+    "include/git2/revparse.h",
+    "src/libgit2/annotated_commit.c",
+    "src/libgit2/annotated_commit.h",
+    "include/git2/annotated_commit.h",
+    "src/libgit2/mailmap.c",
+    "src/libgit2/mailmap.h",
+    "include/git2/mailmap.h",
+    "src/libgit2/reset.c",
+    "include/git2/reset.h",
+    "src/libgit2/rebase.c",
+    "include/git2/rebase.h",
+    "src/libgit2/worktree.c",
+    "src/libgit2/worktree.h",
+    "include/git2/worktree.h",
+    "src/util/zstream.c",
+    "src/util/zstream.h",
+    "src/libgit2/indexer.c",
+    "src/libgit2/indexer.h",
+    {
+      "path": "include/git2/indexer.h",
+      "items": {
+        "excluded": [
+          {
+            "name": "git_indexer_hash",
+            "kind": "symbol"
+          }
+        ]
+      }
+    },
+    "src/libgit2/odb_loose.c",
+    {
+      "path": "include/git2/odb_backend.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_odb_backend_loose_flag_t",
+            "kind": "type"
+          },
+          {
+            "name": "git_odb_backend_loose_options",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/pack.c",
+    "src/libgit2/pack.h",
+    "src/libgit2/delta.c",
+    "src/libgit2/delta.h",
+    "src/libgit2/apply.c",
+    "src/libgit2/apply.h",
+    "include/git2/apply.h",
+    "src/libgit2/mwindow.c",
+    "src/libgit2/mwindow.h",
+    "src/libgit2/commit_graph.c",
+    "src/libgit2/commit_graph.h",
+    "include/git2/sys/commit_graph.h",
+    "src/libgit2/midx.c",
+    "src/libgit2/midx.h",
+    "include/git2/sys/midx.h",
+    "src/libgit2/odb_pack.c",
+    {
+      "path": "include/git2/odb_backend.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_odb_backend_pack_options",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/pack-objects.c",
+    "src/libgit2/pack-objects.h",
+    {
+      "path": "include/git2/pack.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_packbuilder_foreach_cb",
+            "kind": "symbol"
+          },
+          {
+            "name": "git_packbuilder_progress",
+            "kind": "symbol"
+          },
+          {
+            "name": "git_packbuilder_stage_t",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/odb_mempack.c",
+    "src/libgit2/patch_generate.c",
+    "src/libgit2/patch_generate.h",
+    "src/libgit2/blame.c",
+    "src/libgit2/blame.h",
+    {
+      "path": "include/git2/blame.h",
+      "items": {
+        "excluded": [
+          {
+            "name": "git_blame_file_from_buffer",
+            "kind": "symbol"
+          },
+          {
+            "name": "git_blame_get_hunk_byindex",
+            "kind": "symbol"
+          },
+          {
+            "name": "git_blame_get_hunk_byline",
+            "kind": "symbol"
+          },
+          {
+            "name": "git_blame_get_hunk_count",
+            "kind": "symbol"
+          }
+        ]
+      }
+    },
+    "src/libgit2/blame_git.c",
+    "src/libgit2/blame_git.h",
+    "src/libgit2/diff_xdiff.c",
+    "src/libgit2/diff_xdiff.h",
+    "src/libgit2/transport.c",
+    {
+      "path": "include/git2/sys/transport.h",
+      "items": {
+        "excluded": [
+          {
+            "name": "git_transport_dummy",
+            "kind": "symbol"
+          }
+        ]
+      }
+    },
     "include/git2/transport.h",
-    "include/git2/tree.h",
-    "include/git2/types.h",
-    "include/git2/worktree.h"
+    "src/libgit2/fetch.c",
+    {
+      "path": "src/libgit2/fetch.h",
+      "items": {
+        "excluded": [
+          {
+            "name": "git_fetch_setup_walk",
+            "kind": "symbol"
+          }
+        ]
+      }
+    },
+    "src/libgit2/push.c",
+    "src/libgit2/push.h",
+    "src/libgit2/transports/local.c",
+    "src/libgit2/transports/smart.c",
+    {
+      "path": "src/libgit2/transports/smart.h",
+      "items": {
+        "excluded": [
+          {
+            "name": "git_pkt",
+            "kind": "type"
+          },
+          {
+            "name": "git_pkt_ack",
+            "kind": "type"
+          },
+          {
+            "name": "git_pkt_comment",
+            "kind": "type"
+          },
+          {
+            "name": "git_pkt_data",
+            "kind": "type"
+          },
+          {
+            "name": "git_pkt_err",
+            "kind": "type"
+          },
+          {
+            "name": "git_pkt_ng",
+            "kind": "type"
+          },
+          {
+            "name": "git_pkt_ok",
+            "kind": "type"
+          },
+          {
+            "name": "git_pkt_parse_data",
+            "kind": "type"
+          },
+          {
+            "name": "git_pkt_ref",
+            "kind": "type"
+          },
+          {
+            "name": "git_pkt_send_flush",
+            "kind": "symbol"
+          },
+          {
+            "name": "git_pkt_shallow",
+            "kind": "type"
+          },
+          {
+            "name": "git_pkt_type",
+            "kind": "type"
+          },
+          {
+            "name": "git_pkt_unpack",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    {
+      "path": "include/git2/cert.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_cert",
+            "kind": "type"
+          },
+          {
+            "name": "git_cert_t",
+            "kind": "type"
+          },
+          {
+            "name": "git_transport_certificate_check_cb",
+            "kind": "symbol"
+          }
+        ]
+      }
+    },
+    "src/libgit2/stream.h",
+    {
+      "path": "include/git2/sys/stream.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_stream",
+            "kind": "type"
+          },
+          {
+            "name": "git_stream_certificate_cb",
+            "kind": "symbol"
+          },
+          {
+            "name": "git_stream_close_cb",
+            "kind": "symbol"
+          },
+          {
+            "name": "git_stream_connect_cb",
+            "kind": "symbol"
+          },
+          {
+            "name": "git_stream_free_cb",
+            "kind": "symbol"
+          },
+          {
+            "name": "git_stream_read_cb",
+            "kind": "symbol"
+          },
+          {
+            "name": "git_stream_set_proxy_cb",
+            "kind": "symbol"
+          },
+          {
+            "name": "git_stream_write_cb",
+            "kind": "symbol"
+          }
+        ]
+      }
+    },
+    "src/libgit2/streams/registry.c",
+    "src/libgit2/streams/registry.h",
+    {
+      "path": "include/git2/sys/stream.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_stream_registration",
+            "kind": "type"
+          },
+          {
+            "name": "git_stream_t",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/streams/socket.c",
+    "src/libgit2/streams/socket.h",
+    "src/libgit2/streams/openssl.c",
+    "src/libgit2/streams/openssl.h",
+    {
+      "path": "include/git2/cert.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_cert_x509",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "include/git2/sys/openssl.h",
+    "src/libgit2/streams/tls.c",
+    "src/libgit2/streams/tls.h",
+    "src/libgit2/transports/git.c",
+    "src/libgit2/transports/http.c",
+    "src/libgit2/transports/http.h",
+    "src/libgit2/settings.c",
+    "src/libgit2/settings.h",
+    {
+      "path": "include/git2/common.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_buildinfo_t",
+            "kind": "type"
+          },
+          {
+            "name": "git_libgit2_opt_t",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/transports/httpclient.c",
+    "src/libgit2/transports/httpclient.h",
+    "src/libgit2/transports/smart_pkt.c",
+    {
+      "path": "src/libgit2/transports/smart.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_pkt",
+            "kind": "type"
+          },
+          {
+            "name": "git_pkt_ack",
+            "kind": "type"
+          },
+          {
+            "name": "git_pkt_comment",
+            "kind": "type"
+          },
+          {
+            "name": "git_pkt_data",
+            "kind": "type"
+          },
+          {
+            "name": "git_pkt_err",
+            "kind": "type"
+          },
+          {
+            "name": "git_pkt_ng",
+            "kind": "type"
+          },
+          {
+            "name": "git_pkt_ok",
+            "kind": "type"
+          },
+          {
+            "name": "git_pkt_parse_data",
+            "kind": "type"
+          },
+          {
+            "name": "git_pkt_ref",
+            "kind": "type"
+          },
+          {
+            "name": "git_pkt_shallow",
+            "kind": "type"
+          },
+          {
+            "name": "git_pkt_type",
+            "kind": "type"
+          },
+          {
+            "name": "git_pkt_unpack",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/transports/smart_protocol.c",
+    "src/libgit2/transports/ssh.c",
+    "src/libgit2/transports/ssh_libssh2.c",
+    {
+      "path": "src/libgit2/transports/ssh_libssh2.h",
+      "items": {
+        "excluded": [
+          {
+            "name": "git_smart_subtransport_ssh_libssh2",
+            "kind": "symbol"
+          },
+          {
+            "name": "git_smart_subtransport_ssh_libssh2_set_paths",
+            "kind": "symbol"
+          }
+        ]
+      }
+    },
+    {
+      "path": "include/git2/cert.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_cert_hostkey",
+            "kind": "type"
+          },
+          {
+            "name": "git_cert_ssh_raw_type_t",
+            "kind": "type"
+          },
+          {
+            "name": "git_cert_ssh_t",
+            "kind": "type"
+          }
+        ]
+      }
+    },
+    "src/libgit2/libgit2.c",
+    {
+      "path": "include/git2/common.h",
+      "items": {
+        "included": [
+          {
+            "name": "git_feature_t",
+            "kind": "type"
+          }
+        ]
+      }
+    }
   ],
-  "out_of_scope": {
-    "paths": []
-  },
   "t3_dir": "t3"
 }

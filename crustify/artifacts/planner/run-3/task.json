@@ -1,0 +1,10 @@
+{
+  "backend": "claude",
+  "billing": "subscription",
+  "args": [
+    "--model",
+    "claude-opus-5-5"
+  ],
+  "instructions": "instructions.md",
+  "session_id": "0e938694-f964-4844-a6bb-2e36f028bc1c"
+}
