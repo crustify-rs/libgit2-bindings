@@ -18,6 +18,7 @@ and in Notes.
 - **review-workload** — orchestrator's choice: max-types `20`, max-syms `100`
 - **sanitizers** — `asan-ubsan`, `tsan`, `bsan`
 - **target-config** — default, deprecated features disabled (`-DDEPRECATE_HARD=ON`), HTTPS through OpenSSL, SSH, Negotiate auth and i18n off, threads on; OpenSSL, PCRE2 and zlib from the side campaigns' installs of each variant; `build.json` version `3`
+- **module-concurrency** — `concurrent` from 2026-11-06
 
 ## Legend
 
@@ -2105,3 +2106,12 @@ variant was configured again from the checkout, its commands and `build.json`'s 
 unchanged, and links the side campaigns' installs of the same variant. The C baseline's `offline`
 and `util` suites pass on `plain`, `util` on every other variant, and the workspace's tests pass but
 for the five `tests/ub_safe` compile-fail snapshots that fail on this host.
+
+### Settings: `module-concurrency` answered `concurrent` (2026-11-06)
+
+The settings gain question 13, `module-concurrency`, which crustify's scheduling now asks:
+`concurrent`, so that modules that do not depend on each other run at once, each on its own
+branch, and are integrated into `crustify/devel` one at a time. `gates.module` now asks before
+each module's integration. The next planner run converts `schedule.json` to schema v4 and
+re-plans every wave, the landed ones included: the landed part of the new plan is marked
+done, and review waves leave `schedule.json`.
