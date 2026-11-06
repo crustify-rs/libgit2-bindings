@@ -5703,7 +5703,7 @@
           "module": "src/libgit2/diff.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_diff_file",
@@ -5718,23 +5718,11 @@
                 "id_abbrev"
               ],
               "home": "src/libgit2/src/libgit2/diff.rs"
-            },
-            {
-              "name": "git_diff_hunk",
-              "defined_in": "include/git2/diff.h",
-              "kind": "type",
-              "field_anchors": [
-                "header",
-                "header_len",
-                "new_lines",
-                "new_start",
-                "old_lines",
-                "old_start"
-              ],
-              "home": "src/libgit2/src/libgit2/diff.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "97a5f1b7f444543b6bb5e882ad690af370e5b7a9"
+          ]
         },
         {
           "index": 2,
@@ -5810,6 +5798,31 @@
                 "data",
                 "datalen",
                 "inflatedlen"
+              ],
+              "home": "src/libgit2/src/libgit2/diff.rs"
+            }
+          ],
+          "commits": []
+        },
+        {
+          "index": 5,
+          "link_unit": "libgit2",
+          "module": "src/libgit2/diff.c",
+          "foundational": false,
+          "kind": "wrap",
+          "status": "todo",
+          "items": [
+            {
+              "name": "git_diff_hunk",
+              "defined_in": "include/git2/diff.h",
+              "kind": "type",
+              "field_anchors": [
+                "header",
+                "header_len",
+                "new_lines",
+                "new_start",
+                "old_lines",
+                "old_start"
               ],
               "home": "src/libgit2/src/libgit2/diff.rs"
             }
@@ -5917,7 +5930,7 @@
       "foundational": false,
       "layer": 1,
       "sublayer": 1,
-      "status": "wip",
+      "status": "done",
       "depends_on": {
         "scheduled": [
           5,
@@ -6005,7 +6018,7 @@
           "module": "src/libgit2/odb.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_odb_object",
@@ -6015,7 +6028,9 @@
               "home": "src/libgit2/src/libgit2/odb.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "31f74f8e227d17e8b98390be5f5353d39940d166"
+          ]
         }
       ]
     },
@@ -6494,7 +6509,7 @@
           "module": "src/libgit2/diff.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_diff_free",
@@ -6504,6 +6519,48 @@
               "home": "src/libgit2/src/libgit2/diff.rs"
             },
             {
+              "name": "git_diff_num_deltas",
+              "defined_in": "src/libgit2/diff.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/diff.rs"
+            }
+          ],
+          "commits": [
+            "1a9b0e5483dcd8a1e144abe64d0ad89cd764844d"
+          ]
+        },
+        {
+          "index": 3,
+          "link_unit": "libgit2",
+          "module": "src/libgit2/diff.c",
+          "foundational": false,
+          "kind": "wrap",
+          "status": "todo",
+          "items": [
+            {
+              "name": "git_diff_binary",
+              "defined_in": "include/git2/diff.h",
+              "kind": "type",
+              "field_anchors": [
+                "new_file",
+                "old_file",
+                "contains_data"
+              ],
+              "home": "src/libgit2/src/libgit2/diff.rs"
+            }
+          ],
+          "commits": []
+        },
+        {
+          "index": 4,
+          "link_unit": "libgit2",
+          "module": "src/libgit2/diff.c",
+          "foundational": false,
+          "kind": "wrap",
+          "status": "todo",
+          "items": [
+            {
               "name": "git_diff_get_perfdata",
               "defined_in": "src/libgit2/diff.c",
               "kind": "symbol",
@@ -6512,13 +6569,6 @@
             },
             {
               "name": "git_diff_is_sorted_icase",
-              "defined_in": "src/libgit2/diff.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/diff.rs"
-            },
-            {
-              "name": "git_diff_num_deltas",
               "defined_in": "src/libgit2/diff.c",
               "kind": "symbol",
               "field_anchors": [],
@@ -6550,28 +6600,6 @@
               "defined_in": "include/git2/diff.h",
               "kind": "callback",
               "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/diff.rs"
-            }
-          ],
-          "commits": []
-        },
-        {
-          "index": 3,
-          "link_unit": "libgit2",
-          "module": "src/libgit2/diff.c",
-          "foundational": false,
-          "kind": "wrap",
-          "status": "todo",
-          "items": [
-            {
-              "name": "git_diff_binary",
-              "defined_in": "include/git2/diff.h",
-              "kind": "type",
-              "field_anchors": [
-                "new_file",
-                "old_file",
-                "contains_data"
-              ],
               "home": "src/libgit2/src/libgit2/diff.rs"
             }
           ],
@@ -6938,22 +6966,8 @@
           "module": "src/libgit2/odb.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
-            {
-              "name": "git_odb_expand_ids",
-              "defined_in": "src/libgit2/odb.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/odb.rs"
-            },
-            {
-              "name": "git_odb_foreach",
-              "defined_in": "src/libgit2/odb.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/odb.rs"
-            },
             {
               "name": "git_odb_new_ext",
               "defined_in": "src/libgit2/odb.c",
@@ -6970,6 +6984,34 @@
             },
             {
               "name": "git_odb_options_init",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/odb.rs"
+            }
+          ],
+          "commits": [
+            "a18b80d55731dd737ff6330789587ebd5cc6a084",
+            "603bf0085542a88fba6379f21a64073266f6df5c"
+          ]
+        },
+        {
+          "index": 4,
+          "link_unit": "libgit2",
+          "module": "src/libgit2/odb.c",
+          "foundational": false,
+          "kind": "wrap",
+          "status": "todo",
+          "items": [
+            {
+              "name": "git_odb_expand_ids",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/odb.rs"
+            },
+            {
+              "name": "git_odb_foreach",
               "defined_in": "src/libgit2/odb.c",
               "kind": "symbol",
               "field_anchors": [],
@@ -8034,7 +8076,7 @@
       "foundational": false,
       "layer": 1,
       "sublayer": 2,
-      "status": "todo",
+      "status": "wip",
       "depends_on": {
         "scheduled": [
           26,
@@ -8082,6 +8124,26 @@
           "module": "src/libgit2/diff.c",
           "foundational": false,
           "kind": "wrap",
+          "status": "done",
+          "items": [
+            {
+              "name": "git_diff_get_delta",
+              "defined_in": "src/libgit2/diff.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/diff.rs"
+            }
+          ],
+          "commits": [
+            "8f238f339b2f009cef8cce12228fc34418ce0322"
+          ]
+        },
+        {
+          "index": 2,
+          "link_unit": "libgit2",
+          "module": "src/libgit2/diff.c",
+          "foundational": false,
+          "kind": "wrap",
           "status": "todo",
           "items": [
             {
@@ -8095,13 +8157,6 @@
               "name": "git_diff_file_cb",
               "defined_in": "include/git2/diff.h",
               "kind": "callback",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/diff.rs"
-            },
-            {
-              "name": "git_diff_get_delta",
-              "defined_in": "src/libgit2/diff.c",
-              "kind": "symbol",
               "field_anchors": [],
               "home": "src/libgit2/src/libgit2/diff.rs"
             },
@@ -8204,6 +8259,41 @@
           "module": "src/libgit2/odb.c",
           "foundational": false,
           "kind": "wrap",
+          "status": "done",
+          "items": [
+            {
+              "name": "git_odb_backend_data_alloc",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/odb.rs"
+            },
+            {
+              "name": "git_odb_backend_data_free",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/odb.rs"
+            },
+            {
+              "name": "git_odb_init_backend",
+              "defined_in": "src/libgit2/odb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/odb.rs"
+            }
+          ],
+          "commits": [
+            "9ccd4fad59de90f6596d69dcb53258cec9fad27a",
+            "9fe83bce60830288bb2f8157a6c7962abb1927f1"
+          ]
+        },
+        {
+          "index": 2,
+          "link_unit": "libgit2",
+          "module": "src/libgit2/odb.c",
+          "foundational": false,
+          "kind": "wrap",
           "status": "todo",
           "items": [
             {
@@ -8221,28 +8311,7 @@
               "home": "src/libgit2/src/libgit2/odb.rs"
             },
             {
-              "name": "git_odb_backend_data_alloc",
-              "defined_in": "src/libgit2/odb.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/odb.rs"
-            },
-            {
-              "name": "git_odb_backend_data_free",
-              "defined_in": "src/libgit2/odb.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/odb.rs"
-            },
-            {
               "name": "git_odb_get_backend",
-              "defined_in": "src/libgit2/odb.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/odb.rs"
-            },
-            {
-              "name": "git_odb_init_backend",
               "defined_in": "src/libgit2/odb.c",
               "kind": "symbol",
               "field_anchors": [],
@@ -8344,7 +8413,7 @@
       "foundational": false,
       "layer": 1,
       "sublayer": 4,
-      "status": "todo",
+      "status": "wip",
       "depends_on": {
         "scheduled": [
           5,
@@ -8367,7 +8436,7 @@
           "module": "src/libgit2/odb.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_odb_open_rstream",
@@ -8384,14 +8453,27 @@
               "home": "src/libgit2/src/libgit2/odb.rs"
             },
             {
-              "name": "git_odb_stream_finalize_write",
+              "name": "git_odb_stream_free",
               "defined_in": "src/libgit2/odb.c",
               "kind": "symbol",
               "field_anchors": [],
               "home": "src/libgit2/src/libgit2/odb.rs"
-            },
+            }
+          ],
+          "commits": [
+            "3f43c106d582faf37b65768c5ede4907b3bee779"
+          ]
+        },
+        {
+          "index": 1,
+          "link_unit": "libgit2",
+          "module": "src/libgit2/odb.c",
+          "foundational": false,
+          "kind": "wrap",
+          "status": "todo",
+          "items": [
             {
-              "name": "git_odb_stream_free",
+              "name": "git_odb_stream_finalize_write",
               "defined_in": "src/libgit2/odb.c",
               "kind": "symbol",
               "field_anchors": [],
@@ -8743,7 +8825,7 @@
       "foundational": false,
       "layer": 2,
       "sublayer": 0,
-      "status": "wip",
+      "status": "done",
       "depends_on": {
         "scheduled": [
           26
@@ -8786,7 +8868,7 @@
           "module": "src/libgit2/diff_parse.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_diff_from_buffer",
@@ -8796,7 +8878,9 @@
               "home": "src/libgit2/src/libgit2/diff_parse.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "8f238f339b2f009cef8cce12228fc34418ce0322"
+          ]
         }
       ]
     },
@@ -9910,7 +9994,7 @@
       "foundational": false,
       "layer": 2,
       "sublayer": 1,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
           26,
@@ -9931,7 +10015,7 @@
           "module": "src/libgit2/diff_parse.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_diff_from_buffer_ext",
@@ -9941,7 +10025,9 @@
               "home": "src/libgit2/src/libgit2/diff_parse.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "8f238f339b2f009cef8cce12228fc34418ce0322"
+          ]
         }
       ]
     },
@@ -10073,7 +10159,7 @@
       "foundational": false,
       "layer": 2,
       "sublayer": 1,
-      "status": "todo",
+      "status": "wip",
       "depends_on": {
         "scheduled": [
           0,
@@ -10093,6 +10179,80 @@
       "batches": [
         {
           "index": 0,
+          "link_unit": "libgit2",
+          "module": "src/libgit2/filter.c",
+          "foundational": false,
+          "kind": "wrap",
+          "status": "done",
+          "items": [
+            {
+              "name": "git_filter_list_free",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/filter.rs"
+            },
+            {
+              "name": "git_filter_list_load",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/filter.rs"
+            },
+            {
+              "name": "git_filter_list_load_ext",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/filter.rs"
+            },
+            {
+              "name": "git_filter_list_new",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/filter.rs"
+            }
+          ],
+          "commits": [
+            "4d470d62fb360b4ea0ad9af2a5769170e3c7393c",
+            "b7b4fa7a3b367f263ddc5ea7946d9afe29d08b41"
+          ]
+        },
+        {
+          "index": 1,
+          "link_unit": "libgit2",
+          "module": "src/libgit2/filter.c",
+          "foundational": false,
+          "kind": "wrap",
+          "status": "todo",
+          "items": [
+            {
+              "name": "git_filter_source_path",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/filter.rs"
+            },
+            {
+              "name": "git_filter_source_repo",
+              "defined_in": "src/libgit2/filter.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/filter.rs"
+            },
+            {
+              "name": "git_filter_stream_fn",
+              "defined_in": "include/git2/sys/filter.h",
+              "kind": "callback",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/filter.rs"
+            }
+          ],
+          "commits": []
+        },
+        {
+          "index": 2,
           "link_unit": "libgit2",
           "module": "src/libgit2/filter.c",
           "foundational": false,
@@ -10156,35 +10316,7 @@
               "home": "src/libgit2/src/libgit2/filter.rs"
             },
             {
-              "name": "git_filter_list_free",
-              "defined_in": "src/libgit2/filter.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/filter.rs"
-            },
-            {
               "name": "git_filter_list_length",
-              "defined_in": "src/libgit2/filter.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/filter.rs"
-            },
-            {
-              "name": "git_filter_list_load",
-              "defined_in": "src/libgit2/filter.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/filter.rs"
-            },
-            {
-              "name": "git_filter_list_load_ext",
-              "defined_in": "src/libgit2/filter.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/filter.rs"
-            },
-            {
-              "name": "git_filter_list_new",
               "defined_in": "src/libgit2/filter.c",
               "kind": "symbol",
               "field_anchors": [],
@@ -10271,38 +10403,6 @@
               "name": "git_filter_source_mode",
               "defined_in": "src/libgit2/filter.c",
               "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/filter.rs"
-            }
-          ],
-          "commits": []
-        },
-        {
-          "index": 1,
-          "link_unit": "libgit2",
-          "module": "src/libgit2/filter.c",
-          "foundational": false,
-          "kind": "wrap",
-          "status": "todo",
-          "items": [
-            {
-              "name": "git_filter_source_path",
-              "defined_in": "src/libgit2/filter.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/filter.rs"
-            },
-            {
-              "name": "git_filter_source_repo",
-              "defined_in": "src/libgit2/filter.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/filter.rs"
-            },
-            {
-              "name": "git_filter_stream_fn",
-              "defined_in": "include/git2/sys/filter.h",
-              "kind": "callback",
               "field_anchors": [],
               "home": "src/libgit2/src/libgit2/filter.rs"
             }
@@ -13038,7 +13138,7 @@
       "foundational": false,
       "layer": 3,
       "sublayer": 2,
-      "status": "todo",
+      "status": "wip",
       "depends_on": {
         "scheduled": [
           5,
@@ -13063,7 +13163,7 @@
           "module": "src/libgit2/refs.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_reference__alloc",
@@ -13079,6 +13179,94 @@
               "field_anchors": [],
               "home": "src/libgit2/src/libgit2/refs.rs"
             },
+            {
+              "name": "git_reference_dup",
+              "defined_in": "src/libgit2/refs.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/refs.rs"
+            },
+            {
+              "name": "git_reference_free",
+              "defined_in": "src/libgit2/refs.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/refs.rs"
+            }
+          ],
+          "commits": [
+            "20e8019a88871606ed21da26e878551d8004c09e",
+            "cf81160ecaa0b64da554f979d4fc9b473bbb744a"
+          ]
+        },
+        {
+          "index": 1,
+          "link_unit": "libgit2",
+          "module": "src/libgit2/refs.c",
+          "foundational": false,
+          "kind": "wrap",
+          "status": "todo",
+          "items": [
+            {
+              "name": "git_reference_symbolic_create",
+              "defined_in": "src/libgit2/refs.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/refs.rs"
+            },
+            {
+              "name": "git_reference_symbolic_create_matching",
+              "defined_in": "src/libgit2/refs.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/refs.rs"
+            },
+            {
+              "name": "git_reference_symbolic_set_target",
+              "defined_in": "src/libgit2/refs.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/refs.rs"
+            },
+            {
+              "name": "git_reference_symbolic_target",
+              "defined_in": "src/libgit2/refs.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/refs.rs"
+            },
+            {
+              "name": "git_reference_target",
+              "defined_in": "src/libgit2/refs.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/refs.rs"
+            },
+            {
+              "name": "git_reference_target_peel",
+              "defined_in": "src/libgit2/refs.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/refs.rs"
+            },
+            {
+              "name": "git_reference_type",
+              "defined_in": "src/libgit2/refs.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/refs.rs"
+            }
+          ],
+          "commits": []
+        },
+        {
+          "index": 2,
+          "link_unit": "libgit2",
+          "module": "src/libgit2/refs.c",
+          "foundational": false,
+          "kind": "wrap",
+          "status": "todo",
+          "items": [
             {
               "name": "git_reference_cmp",
               "defined_in": "src/libgit2/refs.c",
@@ -13108,13 +13296,6 @@
               "home": "src/libgit2/src/libgit2/refs.rs"
             },
             {
-              "name": "git_reference_dup",
-              "defined_in": "src/libgit2/refs.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/refs.rs"
-            },
-            {
               "name": "git_reference_dwim",
               "defined_in": "src/libgit2/refs.c",
               "kind": "symbol",
@@ -13137,13 +13318,6 @@
             },
             {
               "name": "git_reference_foreach_name",
-              "defined_in": "src/libgit2/refs.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/refs.rs"
-            },
-            {
-              "name": "git_reference_free",
               "defined_in": "src/libgit2/refs.c",
               "kind": "symbol",
               "field_anchors": [],
@@ -13235,66 +13409,6 @@
             },
             {
               "name": "git_reference_shorthand",
-              "defined_in": "src/libgit2/refs.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/refs.rs"
-            }
-          ],
-          "commits": []
-        },
-        {
-          "index": 1,
-          "link_unit": "libgit2",
-          "module": "src/libgit2/refs.c",
-          "foundational": false,
-          "kind": "wrap",
-          "status": "todo",
-          "items": [
-            {
-              "name": "git_reference_symbolic_create",
-              "defined_in": "src/libgit2/refs.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/refs.rs"
-            },
-            {
-              "name": "git_reference_symbolic_create_matching",
-              "defined_in": "src/libgit2/refs.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/refs.rs"
-            },
-            {
-              "name": "git_reference_symbolic_set_target",
-              "defined_in": "src/libgit2/refs.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/refs.rs"
-            },
-            {
-              "name": "git_reference_symbolic_target",
-              "defined_in": "src/libgit2/refs.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/refs.rs"
-            },
-            {
-              "name": "git_reference_target",
-              "defined_in": "src/libgit2/refs.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/refs.rs"
-            },
-            {
-              "name": "git_reference_target_peel",
-              "defined_in": "src/libgit2/refs.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/refs.rs"
-            },
-            {
-              "name": "git_reference_type",
               "defined_in": "src/libgit2/refs.c",
               "kind": "symbol",
               "field_anchors": [],
@@ -14685,7 +14799,7 @@
       "foundational": false,
       "layer": 4,
       "sublayer": 1,
-      "status": "todo",
+      "status": "wip",
       "depends_on": {
         "scheduled": [
           5,
@@ -14708,7 +14822,7 @@
           "module": "src/libgit2/annotated_commit.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_annotated_commit_free",
@@ -14739,14 +14853,27 @@
               "home": "src/libgit2/src/libgit2/annotated_commit.rs"
             },
             {
-              "name": "git_annotated_commit_id",
+              "name": "git_annotated_commit_lookup",
               "defined_in": "src/libgit2/annotated_commit.c",
               "kind": "symbol",
               "field_anchors": [],
               "home": "src/libgit2/src/libgit2/annotated_commit.rs"
-            },
+            }
+          ],
+          "commits": [
+            "edf9d78206c30e7defeaffc832ea227277572aa5"
+          ]
+        },
+        {
+          "index": 1,
+          "link_unit": "libgit2",
+          "module": "src/libgit2/annotated_commit.c",
+          "foundational": false,
+          "kind": "wrap",
+          "status": "todo",
+          "items": [
             {
-              "name": "git_annotated_commit_lookup",
+              "name": "git_annotated_commit_id",
               "defined_in": "src/libgit2/annotated_commit.c",
               "kind": "symbol",
               "field_anchors": [],
@@ -15445,7 +15572,7 @@
       "foundational": false,
       "layer": 4,
       "sublayer": 2,
-      "status": "todo",
+      "status": "wip",
       "depends_on": {
         "scheduled": [
           34,
@@ -15467,15 +15594,8 @@
           "module": "src/libgit2/refdb.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
-            {
-              "name": "git_refdb_compress",
-              "defined_in": "src/libgit2/refdb.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/refdb.rs"
-            },
             {
               "name": "git_refdb_free",
               "defined_in": "src/libgit2/refdb.c",
@@ -15492,6 +15612,26 @@
             },
             {
               "name": "git_refdb_open",
+              "defined_in": "src/libgit2/refdb.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/refdb.rs"
+            }
+          ],
+          "commits": [
+            "a45e7e2b531c42388f693c295c333686217123d5"
+          ]
+        },
+        {
+          "index": 1,
+          "link_unit": "libgit2",
+          "module": "src/libgit2/refdb.c",
+          "foundational": false,
+          "kind": "wrap",
+          "status": "todo",
+          "items": [
+            {
+              "name": "git_refdb_compress",
               "defined_in": "src/libgit2/refdb.c",
               "kind": "symbol",
               "field_anchors": [],
@@ -15903,7 +16043,7 @@
       "foundational": false,
       "layer": 4,
       "sublayer": 1,
-      "status": "todo",
+      "status": "wip",
       "depends_on": {
         "scheduled": [
           5,
@@ -15927,6 +16067,33 @@
           "module": "src/libgit2/transaction.c",
           "foundational": false,
           "kind": "wrap",
+          "status": "done",
+          "items": [
+            {
+              "name": "git_transaction_free",
+              "defined_in": "src/libgit2/transaction.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/transaction.rs"
+            },
+            {
+              "name": "git_transaction_new",
+              "defined_in": "src/libgit2/transaction.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/transaction.rs"
+            }
+          ],
+          "commits": [
+            "f3e17471a26e02ca24bedc928444aa1d00212c0e"
+          ]
+        },
+        {
+          "index": 1,
+          "link_unit": "libgit2",
+          "module": "src/libgit2/transaction.c",
+          "foundational": false,
+          "kind": "wrap",
           "status": "todo",
           "items": [
             {
@@ -15937,21 +16104,7 @@
               "home": "src/libgit2/src/libgit2/transaction.rs"
             },
             {
-              "name": "git_transaction_free",
-              "defined_in": "src/libgit2/transaction.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/transaction.rs"
-            },
-            {
               "name": "git_transaction_lock_ref",
-              "defined_in": "src/libgit2/transaction.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/transaction.rs"
-            },
-            {
-              "name": "git_transaction_new",
               "defined_in": "src/libgit2/transaction.c",
               "kind": "symbol",
               "field_anchors": [],
@@ -17225,7 +17378,7 @@
       "foundational": false,
       "layer": 5,
       "sublayer": 0,
-      "status": "todo",
+      "status": "done",
       "depends_on": {
         "scheduled": [
           26,
@@ -17249,7 +17402,7 @@
           "module": "src/libgit2/diff_generate.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
               "name": "git_diff_index_to_index",
@@ -17294,7 +17447,10 @@
               "home": "src/libgit2/src/libgit2/diff_generate.rs"
             }
           ],
-          "commits": []
+          "commits": [
+            "1a9b0e5483dcd8a1e144abe64d0ad89cd764844d",
+            "8f238f339b2f009cef8cce12228fc34418ce0322"
+          ]
         }
       ]
     },
@@ -17396,7 +17552,7 @@
       "foundational": false,
       "layer": 5,
       "sublayer": 0,
-      "status": "todo",
+      "status": "wip",
       "depends_on": {
         "scheduled": [
           0,
@@ -17439,17 +17595,44 @@
           "module": "src/libgit2/notes.c",
           "foundational": false,
           "kind": "wrap",
-          "status": "todo",
+          "status": "done",
           "items": [
             {
-              "name": "git_note_commit_create",
+              "name": "git_note_commit_iterator_new",
               "defined_in": "src/libgit2/notes.c",
               "kind": "symbol",
               "field_anchors": [],
               "home": "src/libgit2/src/libgit2/notes.rs"
             },
             {
-              "name": "git_note_commit_iterator_new",
+              "name": "git_note_iterator_free",
+              "defined_in": "src/libgit2/notes.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/notes.rs"
+            },
+            {
+              "name": "git_note_iterator_new",
+              "defined_in": "src/libgit2/notes.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/notes.rs"
+            }
+          ],
+          "commits": [
+            "a778521e9979112f371316d003f5a0e2378d1c2a"
+          ]
+        },
+        {
+          "index": 2,
+          "link_unit": "libgit2",
+          "module": "src/libgit2/notes.c",
+          "foundational": false,
+          "kind": "wrap",
+          "status": "todo",
+          "items": [
+            {
+              "name": "git_note_commit_create",
               "defined_in": "src/libgit2/notes.c",
               "kind": "symbol",
               "field_anchors": [],
@@ -17480,20 +17663,6 @@
               "name": "git_note_foreach_cb",
               "defined_in": "include/git2/notes.h",
               "kind": "callback",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/notes.rs"
-            },
-            {
-              "name": "git_note_iterator_free",
-              "defined_in": "src/libgit2/notes.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/notes.rs"
-            },
-            {
-              "name": "git_note_iterator_new",
-              "defined_in": "src/libgit2/notes.c",
-              "kind": "symbol",
               "field_anchors": [],
               "home": "src/libgit2/src/libgit2/notes.rs"
             },
@@ -18570,7 +18739,7 @@
       "foundational": false,
       "layer": 5,
       "sublayer": 3,
-      "status": "todo",
+      "status": "wip",
       "depends_on": {
         "scheduled": [
           34,
@@ -18594,6 +18763,26 @@
           "module": "src/libgit2/checkout.c",
           "foundational": false,
           "kind": "wrap",
+          "status": "done",
+          "items": [
+            {
+              "name": "git_checkout_options_init",
+              "defined_in": "src/libgit2/checkout.c",
+              "kind": "symbol",
+              "field_anchors": [],
+              "home": "src/libgit2/src/libgit2/checkout.rs"
+            }
+          ],
+          "commits": [
+            "97a5f1b7f444543b6bb5e882ad690af370e5b7a9"
+          ]
+        },
+        {
+          "index": 1,
+          "link_unit": "libgit2",
+          "module": "src/libgit2/checkout.c",
+          "foundational": false,
+          "kind": "wrap",
           "status": "todo",
           "items": [
             {
@@ -18605,13 +18794,6 @@
             },
             {
               "name": "git_checkout_index",
-              "defined_in": "src/libgit2/checkout.c",
-              "kind": "symbol",
-              "field_anchors": [],
-              "home": "src/libgit2/src/libgit2/checkout.rs"
-            },
-            {
-              "name": "git_checkout_options_init",
               "defined_in": "src/libgit2/checkout.c",
               "kind": "symbol",
               "field_anchors": [],
