@@ -16,7 +16,7 @@
       "home": "crustify/rust/libgit2/libgit2/repository/repository.rs"
     }
   ],
-  "wave": 20,
+  "wave": "legacy-20",
   "batch": 9,
   "link_unit": "libgit2",
   "module": null,

@@ -16,7 +16,7 @@
       "home": "crustify/rust/libgit2/libgit2/util/errors.rs"
     }
   ],
-  "wave": 4,
+  "wave": "legacy-4",
   "batch": 1,
   "link_unit": "libgit2",
   "module": null,

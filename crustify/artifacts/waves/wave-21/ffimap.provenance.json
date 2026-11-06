@@ -1,12 +1,12 @@
 {
-  "level": "review-wave",
-  "branch": "crustify/reviews/20261008-170008/libgit2/repository/wave-0",
-  "scan": "8ef96843952462e729e7c6cb72453352c89134c2",
-  "base": "65285ef7b157af30e6721b2f0277e24c1067899e",
+  "level": "wave",
+  "branch": "crustify/waves/20261008-170008/libgit2/util/wave-1",
+  "scan": "dd95a582abc7be4871078341bbc63992871fcdc0",
+  "base": "3f58279b4e64994ccb2261c169539d4ad8c909c1",
   "base_from": "reflog creation",
   "crustify": "1a7d4341901fd962d54e979178941898547b09e7",
   "command": "crustify ffimap <workdir> --json --ffibox",
-  "ffibox": "196c5fb",
-  "ffibox_base": "196c5fb",
+  "ffibox": "695d52d",
+  "ffibox_base": "695d52d",
   "ffibox_rule": "latest ffibox commit at or before the scanned commit's committer time"
 }

@@ -51,12 +51,12 @@
       "home": "crustify/rust/libgit2/libgit2/repository/worktree.rs"
     }
   ],
-  "wave": 579,
+  "wave": 52,
   "batch": 0,
   "link_unit": "libgit2",
   "module": "src/libgit2/repository.c",
   "foundational": false,
-  "base_branch": "crustify/waves/wave-579",
+  "base_branch": "crustify/waves/wave-52",
   "model": "openrouter/anthropic/claude-opus-5.5",
   "billing": "api"
 }

@@ -6,7 +6,7 @@
   "paths": [
     "src/libgit2/src/libgit2/filter.rs"
   ],
-  "wave": 524,
+  "wave": "legacy-524",
   "batch": 0,
   "link_unit": "libgit2",
   "module": null,

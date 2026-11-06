@@ -13,12 +13,12 @@
       "home": "crustify/rust/libgit2/libgit2/core/types.rs"
     }
   ],
-  "wave": 601,
+  "wave": 74,
   "batch": 0,
   "link_unit": "libgit2",
   "module": "src/libgit2/signature.c",
   "foundational": false,
-  "base_branch": "crustify/waves/wave-601",
+  "base_branch": "crustify/waves/wave-74",
   "model": "openrouter/anthropic/claude-opus-5.5",
   "billing": "api"
 }

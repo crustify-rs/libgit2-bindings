@@ -2,7 +2,7 @@
   "commits": [
     "9fe83bce60830288bb2f8157a6c7962abb1927f1"
   ],
-  "wave": 181,
+  "wave": "legacy-181",
   "batch": 0,
   "link_unit": "libgit2",
   "module": "src/libgit2/odb.c",

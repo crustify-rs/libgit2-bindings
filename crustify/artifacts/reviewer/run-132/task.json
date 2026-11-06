@@ -6,7 +6,7 @@
   "paths": [
     "tests/ub_safe"
   ],
-  "wave": 526,
+  "wave": "legacy-526",
   "batch": 0,
   "link_unit": "libgit2",
   "module": null,

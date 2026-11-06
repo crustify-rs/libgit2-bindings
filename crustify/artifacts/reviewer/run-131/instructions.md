@@ -3,7 +3,7 @@
 Your batch was reviewed by reviewer run 130, whose two commits are kept at
 `refs/crustify/attempts/wave-333-batch-0-run-130`:
 
-- `024af4038`, its reviews dir (two reports under `crustify/reviews/wave-333/batch-0/`);
+- `024af4038`, its reviews dir (two reports under `crustify/reviews/legacy-wave-333/batch-0/`);
 - `0d973d4fa`, its fixes to the Rust tree, the ownership store and the dashboard.
 
 They could not be promoted: run 130 ran beside review wave 331 from the same base, on

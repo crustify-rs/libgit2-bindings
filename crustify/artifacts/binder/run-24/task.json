@@ -9,12 +9,12 @@
       "home": "crustify/rust/libgit2/libgit2/refs/annotated_commit.rs"
     }
   ],
-  "wave": 574,
+  "wave": 47,
   "batch": 0,
   "link_unit": "libgit2",
   "module": "src/libgit2/annotated_commit.c",
   "foundational": false,
-  "base_branch": "crustify/waves/wave-574",
+  "base_branch": "crustify/waves/wave-47",
   "model": "openrouter/anthropic/claude-opus-5.5",
   "billing": "api"
 }

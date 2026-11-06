@@ -4,7 +4,7 @@
     "f65cb8093",
     "40bbeed36"
   ],
-  "wave": 51,
+  "wave": "legacy-51",
   "batch": 1,
   "link_unit": "libgit2",
   "module": null,

@@ -16,7 +16,7 @@
       "home": "crustify/rust/libgit2/libgit2/core/common.rs"
     }
   ],
-  "wave": 14,
+  "wave": "legacy-14",
   "batch": 2,
   "link_unit": "libgit2",
   "module": null,

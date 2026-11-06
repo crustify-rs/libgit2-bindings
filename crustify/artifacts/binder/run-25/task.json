@@ -9,12 +9,12 @@
       "home": "crustify/rust/libgit2/libgit2/workdir/checkout.rs"
     }
   ],
-  "wave": 652,
+  "wave": 125,
   "batch": 0,
   "link_unit": "libgit2",
   "module": "src/libgit2/checkout.c",
   "foundational": false,
-  "base_branch": "crustify/waves/wave-652",
+  "base_branch": "crustify/waves/wave-125",
   "model": "openrouter/anthropic/claude-opus-5.5",
   "billing": "api"
 }

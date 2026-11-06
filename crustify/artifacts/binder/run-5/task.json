@@ -30,12 +30,12 @@
       "home": "crustify/rust/libgit2/libgit2/util/sys/errors.rs"
     }
   ],
-  "wave": 540,
+  "wave": 13,
   "batch": 1,
   "link_unit": "libgit2",
   "module": "src/util/errors.c",
   "foundational": false,
-  "base_branch": "crustify/waves/wave-540",
+  "base_branch": "crustify/waves/wave-13",
   "model": "openrouter/anthropic/claude-opus-5.5",
   "billing": "api"
 }

@@ -6,7 +6,7 @@
   "paths": [
     "src/libgit2/src/libgit2/buf.rs"
   ],
-  "wave": 525,
+  "wave": "legacy-525",
   "batch": 20,
   "link_unit": "libgit2",
   "module": null,

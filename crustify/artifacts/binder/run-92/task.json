@@ -16,7 +16,7 @@
       "home": "crustify/rust/libgit2/libgit2/index/index.rs"
     }
   ],
-  "wave": 52,
+  "wave": "legacy-52",
   "batch": 1,
   "link_unit": "libgit2",
   "module": null,

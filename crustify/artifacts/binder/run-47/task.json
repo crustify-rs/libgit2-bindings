@@ -9,7 +9,7 @@
       "home": "crustify/rust/libgit2/libgit2/object/tree.rs"
     }
   ],
-  "wave": 26,
+  "wave": "legacy-26",
   "batch": 5,
   "link_unit": "libgit2",
   "module": null,

@@ -6,7 +6,7 @@
   "paths": [
     "src/libgit2/src/libgit2/blob.rs"
   ],
-  "wave": 525,
+  "wave": "legacy-525",
   "batch": 7,
   "link_unit": "libgit2",
   "module": null,

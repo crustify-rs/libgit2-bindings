@@ -16,12 +16,12 @@
       "home": "crustify/rust/libgit2/libgit2/object/tree.rs"
     }
   ],
-  "wave": 630,
+  "wave": 103,
   "batch": 0,
   "link_unit": "libgit2",
   "module": "src/libgit2/tag.c",
   "foundational": false,
-  "base_branch": "crustify/waves/wave-630",
+  "base_branch": "crustify/waves/wave-103",
   "model": "openrouter/anthropic/claude-opus-5.5",
   "billing": "api"
 }

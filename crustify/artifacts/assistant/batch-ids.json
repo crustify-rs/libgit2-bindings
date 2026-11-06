@@ -1,7 +1,7 @@
 {
- "note": "Ids of each translation batch that landed under schedule.json's earlier plan (wave-<i>/batch-<j> as of 04d13bffa), with its binder runs: v4, the batches of the module-ordered plan (planner run 3, landed part marked done) that hold its items, and v4_main, the one holding the most, which its runs' task.json name. Review batches, the annotation pass (waves 524-526) and the batches whose items the plan no longer schedules (enums, the void and string raw-lifetime placeholders) keep their old ids. Wave scans follow the wave holding most of their wave's items, the latest kept where several end in one.",
+ "note": "Ids of each translation batch that landed under schedule.json's earlier plan (wave-<i>/batch-<j> as of 04d13bffa), with its binder runs: v4, the batches of the module-ordered plan (planner run 3, landed part marked done) that hold its items, and v4_main, the one holding the most, which its runs' task.json name. Review batches, the annotation pass (waves 524-526) and the batches whose items the plan no longer schedules (enums, the void and string raw-lifetime placeholders) keep their old ids. Wave scans follow the wave holding most of their wave's items, the latest kept where several end in one. The plan's waves are numbered from 0; every id of the earlier plans, in this file, in run task.json, review dirs, wave scans and dashboard rows, is legacy-<n>.",
  "batches": {
-  "wave-0/batch-0": {
+  "legacy-wave-0/batch-0": {
    "v4": [],
    "v4_main": null,
    "unplanned": [
@@ -11,7 +11,7 @@
     "binder/run-1"
    ]
   },
-  "wave-2/batch-0": {
+  "legacy-wave-2/batch-0": {
    "v4": [],
    "v4_main": null,
    "unplanned": [
@@ -21,18 +21,18 @@
     "binder/run-2"
    ]
   },
-  "wave-4/batch-0": {
+  "legacy-wave-4/batch-0": {
    "v4": [
-    "wave-539/batch-0",
-    "wave-540/batch-0"
+    "wave-12/batch-0",
+    "wave-13/batch-0"
    ],
-   "v4_main": "wave-539/batch-0",
+   "v4_main": "wave-12/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-3"
    ]
   },
-  "wave-4/batch-1": {
+  "legacy-wave-4/batch-1": {
    "v4": [],
    "v4_main": null,
    "unplanned": [
@@ -43,37 +43,37 @@
     "binder/run-4"
    ]
   },
-  "wave-4/batch-2": {
+  "legacy-wave-4/batch-2": {
    "v4": [
-    "wave-540/batch-1"
+    "wave-13/batch-1"
    ],
-   "v4_main": "wave-540/batch-1",
+   "v4_main": "wave-13/batch-1",
    "unplanned": [],
    "runs": [
     "binder/run-5"
    ]
   },
-  "wave-5/batch-0": {
+  "legacy-wave-5/batch-0": {
    "v4": [
-    "wave-548/batch-0"
+    "wave-21/batch-0"
    ],
-   "v4_main": "wave-548/batch-0",
+   "v4_main": "wave-21/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-6"
    ]
   },
-  "wave-8/batch-0": {
+  "legacy-wave-8/batch-0": {
    "v4": [
-    "wave-532/batch-0"
+    "wave-5/batch-0"
    ],
-   "v4_main": "wave-532/batch-0",
+   "v4_main": "wave-5/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-7"
    ]
   },
-  "wave-8/batch-1": {
+  "legacy-wave-8/batch-1": {
    "v4": [],
    "v4_main": null,
    "unplanned": [
@@ -83,41 +83,41 @@
     "binder/run-8"
    ]
   },
-  "wave-9/batch-0": {
+  "legacy-wave-9/batch-0": {
    "v4": [
-    "wave-557/batch-0"
+    "wave-30/batch-0"
    ],
-   "v4_main": "wave-557/batch-0",
+   "v4_main": "wave-30/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-9"
    ]
   },
-  "wave-9/batch-1": {
+  "legacy-wave-9/batch-1": {
    "v4": [
-    "wave-544/batch-0"
+    "wave-17/batch-0"
    ],
-   "v4_main": "wave-544/batch-0",
+   "v4_main": "wave-17/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-10"
    ]
   },
-  "wave-10/batch-0": {
+  "legacy-wave-10/batch-0": {
    "v4": [
-    "wave-568/batch-0"
+    "wave-41/batch-0"
    ],
-   "v4_main": "wave-568/batch-0",
+   "v4_main": "wave-41/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-11"
    ]
   },
-  "wave-14/batch-0": {
+  "legacy-wave-14/batch-0": {
    "v4": [
-    "wave-527/batch-0"
+    "wave-0/batch-0"
    ],
-   "v4_main": "wave-527/batch-0",
+   "v4_main": "wave-0/batch-0",
    "unplanned": [
     "git_branch_t"
    ],
@@ -125,7 +125,7 @@
     "binder/run-12"
    ]
   },
-  "wave-14/batch-1": {
+  "legacy-wave-14/batch-1": {
    "v4": [],
    "v4_main": null,
    "unplanned": [
@@ -136,7 +136,7 @@
     "binder/run-13"
    ]
   },
-  "wave-14/batch-2": {
+  "legacy-wave-14/batch-2": {
    "v4": [],
    "v4_main": null,
    "unplanned": [
@@ -147,7 +147,7 @@
     "binder/run-14"
    ]
   },
-  "wave-14/batch-3": {
+  "legacy-wave-14/batch-3": {
    "v4": [],
    "v4_main": null,
    "unplanned": [
@@ -158,11 +158,11 @@
     "binder/run-15"
    ]
   },
-  "wave-14/batch-4": {
+  "legacy-wave-14/batch-4": {
    "v4": [
-    "wave-535/batch-0"
+    "wave-8/batch-0"
    ],
-   "v4_main": "wave-535/batch-0",
+   "v4_main": "wave-8/batch-0",
    "unplanned": [
     "git_submodule_ignore_t"
    ],
@@ -170,7 +170,7 @@
     "binder/run-16"
    ]
   },
-  "wave-14/batch-5": {
+  "legacy-wave-14/batch-5": {
    "v4": [],
    "v4_main": null,
    "unplanned": [
@@ -181,11 +181,11 @@
     "binder/run-17"
    ]
   },
-  "wave-14/batch-6": {
+  "legacy-wave-14/batch-6": {
    "v4": [
-    "wave-601/batch-0"
+    "wave-74/batch-0"
    ],
-   "v4_main": "wave-601/batch-0",
+   "v4_main": "wave-74/batch-0",
    "unplanned": [
     "git_trace_level_t"
    ],
@@ -193,107 +193,107 @@
     "binder/run-18"
    ]
   },
-  "wave-14/batch-7": {
+  "legacy-wave-14/batch-7": {
    "v4": [
-    "wave-593/batch-2"
+    "wave-66/batch-2"
    ],
-   "v4_main": "wave-593/batch-2",
+   "v4_main": "wave-66/batch-2",
    "unplanned": [],
    "runs": [
     "binder/run-19"
    ]
   },
-  "wave-14/batch-8": {
+  "legacy-wave-14/batch-8": {
    "v4": [
-    "wave-531/batch-0",
-    "wave-534/batch-0"
+    "wave-4/batch-0",
+    "wave-7/batch-0"
    ],
-   "v4_main": "wave-531/batch-0",
+   "v4_main": "wave-4/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-20"
    ]
   },
-  "wave-16/batch-0": {
+  "legacy-wave-16/batch-0": {
    "v4": [
-    "wave-601/batch-0"
+    "wave-74/batch-0"
    ],
-   "v4_main": "wave-601/batch-0",
+   "v4_main": "wave-74/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-21"
    ]
   },
-  "wave-16/batch-1": {
+  "legacy-wave-16/batch-1": {
    "v4": [
-    "wave-531/batch-0",
-    "wave-534/batch-0",
-    "wave-536/batch-0",
-    "wave-541/batch-0",
-    "wave-545/batch-0"
+    "wave-4/batch-0",
+    "wave-7/batch-0",
+    "wave-9/batch-0",
+    "wave-14/batch-0",
+    "wave-18/batch-0"
    ],
-   "v4_main": "wave-531/batch-0",
+   "v4_main": "wave-4/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-22"
    ]
   },
-  "wave-18/batch-0": {
+  "legacy-wave-18/batch-0": {
    "v4": [
-    "wave-536/batch-0"
+    "wave-9/batch-0"
    ],
-   "v4_main": "wave-536/batch-0",
+   "v4_main": "wave-9/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-23"
    ]
   },
-  "wave-20/batch-0": {
+  "legacy-wave-20/batch-0": {
    "v4": [
-    "wave-574/batch-0"
+    "wave-47/batch-0"
    ],
-   "v4_main": "wave-574/batch-0",
+   "v4_main": "wave-47/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-24"
    ]
   },
-  "wave-20/batch-1": {
+  "legacy-wave-20/batch-1": {
    "v4": [
-    "wave-652/batch-0"
+    "wave-125/batch-0"
    ],
-   "v4_main": "wave-652/batch-0",
+   "v4_main": "wave-125/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-25"
    ]
   },
-  "wave-20/batch-2": {
+  "legacy-wave-20/batch-2": {
    "v4": [
-    "wave-571/batch-0",
-    "wave-575/batch-0"
+    "wave-44/batch-0",
+    "wave-48/batch-0"
    ],
-   "v4_main": "wave-571/batch-0",
+   "v4_main": "wave-44/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-28"
    ]
   },
-  "wave-20/batch-3": {
+  "legacy-wave-20/batch-3": {
    "v4": [
-    "wave-576/batch-0"
+    "wave-49/batch-0"
    ],
-   "v4_main": "wave-576/batch-0",
+   "v4_main": "wave-49/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-29"
    ]
   },
-  "wave-20/batch-4": {
+  "legacy-wave-20/batch-4": {
    "v4": [
-    "wave-549/batch-0"
+    "wave-22/batch-0"
    ],
-   "v4_main": "wave-549/batch-0",
+   "v4_main": "wave-22/batch-0",
    "unplanned": [
     "git_path_fs"
    ],
@@ -301,11 +301,11 @@
     "binder/run-30"
    ]
   },
-  "wave-20/batch-5": {
+  "legacy-wave-20/batch-5": {
    "v4": [
-    "wave-577/batch-0"
+    "wave-50/batch-0"
    ],
-   "v4_main": "wave-577/batch-0",
+   "v4_main": "wave-50/batch-0",
    "unplanned": [
     "git_path_gitfile"
    ],
@@ -313,11 +313,11 @@
     "binder/run-31"
    ]
   },
-  "wave-20/batch-6": {
+  "legacy-wave-20/batch-6": {
    "v4": [
-    "wave-573/batch-0"
+    "wave-46/batch-0"
    ],
-   "v4_main": "wave-573/batch-0",
+   "v4_main": "wave-46/batch-0",
    "unplanned": [
     "git_refdb_t"
    ],
@@ -325,17 +325,17 @@
     "binder/run-32"
    ]
   },
-  "wave-20/batch-7": {
+  "legacy-wave-20/batch-7": {
    "v4": [
-    "wave-561/batch-0"
+    "wave-34/batch-0"
    ],
-   "v4_main": "wave-561/batch-0",
+   "v4_main": "wave-34/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-33"
    ]
   },
-  "wave-20/batch-8": {
+  "legacy-wave-20/batch-8": {
    "v4": [],
    "v4_main": null,
    "unplanned": [
@@ -346,7 +346,7 @@
     "binder/run-34"
    ]
   },
-  "wave-20/batch-9": {
+  "legacy-wave-20/batch-9": {
    "v4": [],
    "v4_main": null,
    "unplanned": [
@@ -357,11 +357,11 @@
     "binder/run-35"
    ]
   },
-  "wave-20/batch-10": {
+  "legacy-wave-20/batch-10": {
    "v4": [
-    "wave-578/batch-0"
+    "wave-51/batch-0"
    ],
-   "v4_main": "wave-578/batch-0",
+   "v4_main": "wave-51/batch-0",
    "unplanned": [
     "git_repository_state_t"
    ],
@@ -369,11 +369,11 @@
     "binder/run-26"
    ]
   },
-  "wave-20/batch-11": {
+  "legacy-wave-20/batch-11": {
    "v4": [
-    "wave-653/batch-1"
+    "wave-126/batch-1"
    ],
-   "v4_main": "wave-653/batch-1",
+   "v4_main": "wave-126/batch-1",
    "unplanned": [
     "git_worktree_prune_t"
    ],
@@ -381,81 +381,81 @@
     "binder/run-27"
    ]
   },
-  "wave-22/batch-0": {
+  "legacy-wave-22/batch-0": {
    "v4": [
-    "wave-561/batch-1"
+    "wave-34/batch-1"
    ],
-   "v4_main": "wave-561/batch-1",
+   "v4_main": "wave-34/batch-1",
    "unplanned": [],
    "runs": [
     "binder/run-36"
    ]
   },
-  "wave-22/batch-1": {
+  "legacy-wave-22/batch-1": {
    "v4": [
-    "wave-653/batch-0"
+    "wave-126/batch-0"
    ],
-   "v4_main": "wave-653/batch-0",
+   "v4_main": "wave-126/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-37"
    ]
   },
-  "wave-22/batch-2": {
+  "legacy-wave-22/batch-2": {
    "v4": [
-    "wave-533/batch-0",
-    "wave-561/batch-2",
-    "wave-579/batch-0",
-    "wave-579/batch-1"
+    "wave-6/batch-0",
+    "wave-34/batch-2",
+    "wave-52/batch-0",
+    "wave-52/batch-1"
    ],
-   "v4_main": "wave-579/batch-0",
+   "v4_main": "wave-52/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-38"
    ]
   },
-  "wave-22/batch-3": {
+  "legacy-wave-22/batch-3": {
    "v4": [
-    "wave-561/batch-2",
-    "wave-579/batch-1",
-    "wave-579/batch-2"
+    "wave-34/batch-2",
+    "wave-52/batch-1",
+    "wave-52/batch-2"
    ],
-   "v4_main": "wave-579/batch-1",
+   "v4_main": "wave-52/batch-1",
    "unplanned": [],
    "runs": [
     "binder/run-39"
    ]
   },
-  "wave-22/batch-4": {
+  "legacy-wave-22/batch-4": {
    "v4": [
-    "wave-579/batch-2",
-    "wave-653/batch-2",
-    "wave-662/batch-0"
+    "wave-52/batch-2",
+    "wave-126/batch-2",
+    "wave-135/batch-0"
    ],
-   "v4_main": "wave-662/batch-0",
+   "v4_main": "wave-135/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-40"
    ]
   },
-  "wave-24/batch-0": {
+  "legacy-wave-24/batch-0": {
    "v4": [
-    "wave-579/batch-0",
-    "wave-579/batch-1",
-    "wave-592/batch-0",
-    "wave-662/batch-0"
+    "wave-52/batch-0",
+    "wave-52/batch-1",
+    "wave-65/batch-0",
+    "wave-135/batch-0"
    ],
-   "v4_main": "wave-579/batch-0",
+   "v4_main": "wave-52/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-41"
    ]
   },
-  "wave-26/batch-0": {
+  "legacy-wave-26/batch-0": {
    "v4": [
-    "wave-645/batch-0"
+    "wave-118/batch-0"
    ],
-   "v4_main": "wave-645/batch-0",
+   "v4_main": "wave-118/batch-0",
    "unplanned": [
     "git_blob_filter_flag_t"
    ],
@@ -463,44 +463,44 @@
     "binder/run-42"
    ]
   },
-  "wave-26/batch-1": {
+  "legacy-wave-26/batch-1": {
    "v4": [
-    "wave-593/batch-0",
-    "wave-645/batch-1"
+    "wave-66/batch-0",
+    "wave-118/batch-1"
    ],
-   "v4_main": "wave-593/batch-0",
+   "v4_main": "wave-66/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-43"
    ]
   },
-  "wave-26/batch-2": {
+  "legacy-wave-26/batch-2": {
    "v4": [
-    "wave-537/batch-0",
-    "wave-625/batch-0"
+    "wave-10/batch-0",
+    "wave-98/batch-0"
    ],
-   "v4_main": "wave-537/batch-0",
+   "v4_main": "wave-10/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-44"
    ]
   },
-  "wave-26/batch-3": {
+  "legacy-wave-26/batch-3": {
    "v4": [
-    "wave-572/batch-0",
-    "wave-631/batch-0"
+    "wave-45/batch-0",
+    "wave-104/batch-0"
    ],
-   "v4_main": "wave-572/batch-0",
+   "v4_main": "wave-45/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-45"
    ]
   },
-  "wave-26/batch-4": {
+  "legacy-wave-26/batch-4": {
    "v4": [
-    "wave-631/batch-1"
+    "wave-104/batch-1"
    ],
-   "v4_main": "wave-631/batch-1",
+   "v4_main": "wave-104/batch-1",
    "unplanned": [
     "git_tree_update_t"
    ],
@@ -508,7 +508,7 @@
     "binder/run-46"
    ]
   },
-  "wave-26/batch-5": {
+  "legacy-wave-26/batch-5": {
    "v4": [],
    "v4_main": null,
    "unplanned": [
@@ -518,191 +518,191 @@
     "binder/run-47"
    ]
   },
-  "wave-26/batch-6": {
+  "legacy-wave-26/batch-6": {
    "v4": [
-    "wave-620/batch-1",
-    "wave-630/batch-1"
+    "wave-93/batch-1",
+    "wave-103/batch-1"
    ],
-   "v4_main": "wave-620/batch-1",
+   "v4_main": "wave-93/batch-1",
    "unplanned": [],
    "runs": [
     "binder/run-48"
    ]
   },
-  "wave-28/batch-0": {
+  "legacy-wave-28/batch-0": {
    "v4": [
-    "wave-607/batch-0",
-    "wave-620/batch-0"
+    "wave-80/batch-0",
+    "wave-93/batch-0"
    ],
-   "v4_main": "wave-607/batch-0",
+   "v4_main": "wave-80/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-49"
    ]
   },
-  "wave-28/batch-1": {
+  "legacy-wave-28/batch-1": {
    "v4": [
-    "wave-575/batch-0",
-    "wave-663/batch-0"
+    "wave-48/batch-0",
+    "wave-136/batch-0"
    ],
-   "v4_main": "wave-575/batch-0",
+   "v4_main": "wave-48/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-50"
    ]
   },
-  "wave-28/batch-2": {
+  "legacy-wave-28/batch-2": {
    "v4": [
-    "wave-537/batch-0",
-    "wave-596/batch-0"
+    "wave-10/batch-0",
+    "wave-69/batch-0"
    ],
-   "v4_main": "wave-537/batch-0",
+   "v4_main": "wave-10/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-51"
    ]
   },
-  "wave-28/batch-3": {
+  "legacy-wave-28/batch-3": {
    "v4": [
-    "wave-630/batch-0",
-    "wave-631/batch-0"
+    "wave-103/batch-0",
+    "wave-104/batch-0"
    ],
-   "v4_main": "wave-630/batch-0",
+   "v4_main": "wave-103/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-52"
    ]
   },
-  "wave-28/batch-4": {
+  "legacy-wave-28/batch-4": {
    "v4": [
-    "wave-631/batch-1"
+    "wave-104/batch-1"
    ],
-   "v4_main": "wave-631/batch-1",
+   "v4_main": "wave-104/batch-1",
    "unplanned": [],
    "runs": [
     "binder/run-53"
    ]
   },
-  "wave-28/batch-5": {
+  "legacy-wave-28/batch-5": {
    "v4": [
-    "wave-554/batch-0",
-    "wave-609/batch-0",
-    "wave-620/batch-1",
-    "wave-637/batch-0",
-    "wave-645/batch-2",
-    "wave-655/batch-0",
-    "wave-655/batch-1"
+    "wave-27/batch-0",
+    "wave-82/batch-0",
+    "wave-93/batch-1",
+    "wave-110/batch-0",
+    "wave-118/batch-2",
+    "wave-128/batch-0",
+    "wave-128/batch-1"
    ],
-   "v4_main": "wave-609/batch-0",
+   "v4_main": "wave-82/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-54"
    ]
   },
-  "wave-28/batch-6": {
+  "legacy-wave-28/batch-6": {
    "v4": [
-    "wave-596/batch-1",
-    "wave-609/batch-0",
-    "wave-630/batch-1",
-    "wave-642/batch-0"
+    "wave-69/batch-1",
+    "wave-82/batch-0",
+    "wave-103/batch-1",
+    "wave-115/batch-0"
    ],
-   "v4_main": "wave-642/batch-0",
+   "v4_main": "wave-115/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-55"
    ]
   },
-  "wave-28/batch-7": {
+  "legacy-wave-28/batch-7": {
    "v4": [
-    "wave-642/batch-0"
+    "wave-115/batch-0"
    ],
-   "v4_main": "wave-642/batch-0",
+   "v4_main": "wave-115/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-56"
    ]
   },
-  "wave-30/batch-0": {
+  "legacy-wave-30/batch-0": {
    "v4": [
-    "wave-663/batch-0"
+    "wave-136/batch-0"
    ],
-   "v4_main": "wave-663/batch-0",
+   "v4_main": "wave-136/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-57"
    ]
   },
-  "wave-30/batch-1": {
+  "legacy-wave-30/batch-1": {
    "v4": [
-    "wave-633/batch-0",
-    "wave-645/batch-2",
-    "wave-655/batch-0",
-    "wave-669/batch-0",
-    "wave-680/batch-0"
+    "wave-106/batch-0",
+    "wave-118/batch-2",
+    "wave-128/batch-0",
+    "wave-142/batch-0",
+    "wave-153/batch-0"
    ],
-   "v4_main": "wave-655/batch-0",
+   "v4_main": "wave-128/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-58"
    ]
   },
-  "wave-30/batch-2": {
+  "legacy-wave-30/batch-2": {
    "v4": [
-    "wave-546/batch-0",
-    "wave-609/batch-0",
-    "wave-637/batch-0",
-    "wave-655/batch-0",
-    "wave-680/batch-0"
+    "wave-19/batch-0",
+    "wave-82/batch-0",
+    "wave-110/batch-0",
+    "wave-128/batch-0",
+    "wave-153/batch-0"
    ],
-   "v4_main": "wave-655/batch-0",
+   "v4_main": "wave-128/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-59"
    ]
   },
-  "wave-30/batch-3": {
+  "legacy-wave-30/batch-3": {
    "v4": [
-    "wave-609/batch-0",
-    "wave-615/batch-0",
-    "wave-630/batch-1",
-    "wave-641/batch-0",
-    "wave-642/batch-0",
-    "wave-680/batch-0"
+    "wave-82/batch-0",
+    "wave-88/batch-0",
+    "wave-103/batch-1",
+    "wave-114/batch-0",
+    "wave-115/batch-0",
+    "wave-153/batch-0"
    ],
-   "v4_main": "wave-641/batch-0",
+   "v4_main": "wave-114/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-60"
    ]
   },
-  "wave-30/batch-4": {
+  "legacy-wave-30/batch-4": {
    "v4": [
-    "wave-642/batch-0",
-    "wave-644/batch-0",
-    "wave-680/batch-0"
+    "wave-115/batch-0",
+    "wave-117/batch-0",
+    "wave-153/batch-0"
    ],
-   "v4_main": "wave-642/batch-0",
+   "v4_main": "wave-115/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-61"
    ]
   },
-  "wave-32/batch-0": {
+  "legacy-wave-32/batch-0": {
    "v4": [
-    "wave-663/batch-1",
-    "wave-669/batch-0"
+    "wave-136/batch-1",
+    "wave-142/batch-0"
    ],
-   "v4_main": "wave-669/batch-0",
+   "v4_main": "wave-142/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-62"
    ]
   },
-  "wave-34/batch-0": {
+  "legacy-wave-34/batch-0": {
    "v4": [
-    "wave-622/batch-0"
+    "wave-95/batch-0"
    ],
-   "v4_main": "wave-622/batch-0",
+   "v4_main": "wave-95/batch-0",
    "unplanned": [
     "git_config_level_t"
    ],
@@ -710,11 +710,11 @@
     "binder/run-63"
    ]
   },
-  "wave-34/batch-1": {
+  "legacy-wave-34/batch-1": {
    "v4": [
-    "wave-603/batch-0"
+    "wave-76/batch-0"
    ],
-   "v4_main": "wave-603/batch-0",
+   "v4_main": "wave-76/batch-0",
    "unplanned": [
     "git_configmap_t"
    ],
@@ -722,141 +722,141 @@
     "binder/run-64"
    ]
   },
-  "wave-34/batch-2": {
+  "legacy-wave-34/batch-2": {
    "v4": [
-    "wave-588/batch-2"
+    "wave-61/batch-2"
    ],
-   "v4_main": "wave-588/batch-2",
+   "v4_main": "wave-61/batch-2",
    "unplanned": [],
    "runs": [
     "binder/run-65"
    ]
   },
-  "wave-36/batch-0": {
+  "legacy-wave-36/batch-0": {
    "v4": [
-    "wave-588/batch-0",
-    "wave-588/batch-1"
+    "wave-61/batch-0",
+    "wave-61/batch-1"
    ],
-   "v4_main": "wave-588/batch-0",
+   "v4_main": "wave-61/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-66"
    ]
   },
-  "wave-36/batch-1": {
+  "legacy-wave-36/batch-1": {
    "v4": [
-    "wave-588/batch-2",
-    "wave-604/batch-1",
-    "wave-635/batch-0"
+    "wave-61/batch-2",
+    "wave-77/batch-1",
+    "wave-108/batch-0"
    ],
-   "v4_main": "wave-604/batch-1",
+   "v4_main": "wave-77/batch-1",
    "unplanned": [],
    "runs": [
     "binder/run-67"
    ]
   },
-  "wave-36/batch-2": {
+  "legacy-wave-36/batch-2": {
    "v4": [
-    "wave-604/batch-2"
+    "wave-77/batch-2"
    ],
-   "v4_main": "wave-604/batch-2",
+   "v4_main": "wave-77/batch-2",
    "unplanned": [],
    "runs": [
     "binder/run-68"
    ]
   },
-  "wave-38/batch-0": {
+  "legacy-wave-38/batch-0": {
    "v4": [
-    "wave-604/batch-0"
+    "wave-77/batch-0"
    ],
-   "v4_main": "wave-604/batch-0",
+   "v4_main": "wave-77/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-69"
    ]
   },
-  "wave-38/batch-1": {
+  "legacy-wave-38/batch-1": {
    "v4": [
-    "wave-604/batch-1"
+    "wave-77/batch-1"
    ],
-   "v4_main": "wave-604/batch-1",
+   "v4_main": "wave-77/batch-1",
    "unplanned": [],
    "runs": [
     "binder/run-70"
    ]
   },
-  "wave-40/batch-0": {
+  "legacy-wave-40/batch-0": {
    "v4": [
-    "wave-617/batch-0"
+    "wave-90/batch-0"
    ],
-   "v4_main": "wave-617/batch-0",
+   "v4_main": "wave-90/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-71"
    ]
   },
-  "wave-40/batch-1": {
+  "legacy-wave-40/batch-1": {
    "v4": [
-    "wave-616/batch-1"
+    "wave-89/batch-1"
    ],
-   "v4_main": "wave-616/batch-1",
+   "v4_main": "wave-89/batch-1",
    "unplanned": [],
    "runs": [
     "binder/run-72"
    ]
   },
-  "wave-42/batch-0": {
+  "legacy-wave-42/batch-0": {
    "v4": [
-    "wave-616/batch-0"
+    "wave-89/batch-0"
    ],
-   "v4_main": "wave-616/batch-0",
+   "v4_main": "wave-89/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-73"
    ]
   },
-  "wave-42/batch-1": {
+  "legacy-wave-42/batch-1": {
    "v4": [
-    "wave-618/batch-0"
+    "wave-91/batch-0"
    ],
-   "v4_main": "wave-618/batch-0",
+   "v4_main": "wave-91/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-74"
    ]
   },
-  "wave-44/batch-0": {
+  "legacy-wave-44/batch-0": {
    "v4": [
-    "wave-617/batch-1"
+    "wave-90/batch-1"
    ],
-   "v4_main": "wave-617/batch-1",
+   "v4_main": "wave-90/batch-1",
    "unplanned": [],
    "runs": [
     "binder/run-75"
    ]
   },
-  "wave-46/batch-0": {
+  "legacy-wave-46/batch-0": {
    "v4": [
-    "wave-616/batch-0"
+    "wave-89/batch-0"
    ],
-   "v4_main": "wave-616/batch-0",
+   "v4_main": "wave-89/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-76"
    ]
   },
-  "wave-48/batch-0": {
+  "legacy-wave-48/batch-0": {
    "v4": [
-    "wave-553/batch-0",
-    "wave-564/batch-0"
+    "wave-26/batch-0",
+    "wave-37/batch-0"
    ],
-   "v4_main": "wave-553/batch-0",
+   "v4_main": "wave-26/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-77"
    ]
   },
-  "wave-48/batch-1": {
+  "legacy-wave-48/batch-1": {
    "v4": [],
    "v4_main": null,
    "unplanned": [
@@ -867,11 +867,11 @@
     "binder/run-78"
    ]
   },
-  "wave-48/batch-2": {
+  "legacy-wave-48/batch-2": {
    "v4": [
-    "wave-646/batch-0"
+    "wave-119/batch-0"
    ],
-   "v4_main": "wave-646/batch-0",
+   "v4_main": "wave-119/batch-0",
    "unplanned": [
     "git_index_entry_extended_flag_t"
    ],
@@ -879,11 +879,11 @@
     "binder/run-79"
    ]
   },
-  "wave-48/batch-3": {
+  "legacy-wave-48/batch-3": {
    "v4": [
-    "wave-646/batch-0"
+    "wave-119/batch-0"
    ],
-   "v4_main": "wave-646/batch-0",
+   "v4_main": "wave-119/batch-0",
    "unplanned": [
     "git_index_entry_flag_t"
    ],
@@ -891,11 +891,11 @@
     "binder/run-80"
    ]
   },
-  "wave-48/batch-4": {
+  "legacy-wave-48/batch-4": {
    "v4": [
-    "wave-646/batch-1"
+    "wave-119/batch-1"
    ],
-   "v4_main": "wave-646/batch-1",
+   "v4_main": "wave-119/batch-1",
    "unplanned": [
     "git_index_stage_t"
    ],
@@ -903,22 +903,22 @@
     "binder/run-81"
    ]
   },
-  "wave-48/batch-5": {
+  "legacy-wave-48/batch-5": {
    "v4": [
-    "wave-530/batch-0",
-    "wave-646/batch-2"
+    "wave-3/batch-0",
+    "wave-119/batch-2"
    ],
-   "v4_main": "wave-530/batch-0",
+   "v4_main": "wave-3/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-84"
    ]
   },
-  "wave-48/batch-6": {
+  "legacy-wave-48/batch-6": {
    "v4": [
-    "wave-613/batch-0"
+    "wave-86/batch-0"
    ],
-   "v4_main": "wave-613/batch-0",
+   "v4_main": "wave-86/batch-0",
    "unplanned": [
     "git_pathspec_flag_t"
    ],
@@ -926,93 +926,93 @@
     "binder/run-85"
    ]
   },
-  "wave-48/batch-7": {
+  "legacy-wave-48/batch-7": {
    "v4": [
-    "wave-681/batch-0"
+    "wave-154/batch-0"
    ],
-   "v4_main": "wave-681/batch-0",
+   "v4_main": "wave-154/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-82"
    ]
   },
-  "wave-48/batch-8": {
+  "legacy-wave-48/batch-8": {
    "v4": [
-    "wave-646/batch-3"
+    "wave-119/batch-3"
    ],
-   "v4_main": "wave-646/batch-3",
+   "v4_main": "wave-119/batch-3",
    "unplanned": [],
    "runs": [
     "binder/run-83"
    ]
   },
-  "wave-50/batch-0": {
+  "legacy-wave-50/batch-0": {
    "v4": [
-    "wave-646/batch-1",
-    "wave-656/batch-0"
+    "wave-119/batch-1",
+    "wave-129/batch-0"
    ],
-   "v4_main": "wave-646/batch-1",
+   "v4_main": "wave-119/batch-1",
    "unplanned": [],
    "runs": [
     "binder/run-86"
    ]
   },
-  "wave-50/batch-1": {
+  "legacy-wave-50/batch-1": {
    "v4": [
-    "wave-646/batch-2"
+    "wave-119/batch-2"
    ],
-   "v4_main": "wave-646/batch-2",
+   "v4_main": "wave-119/batch-2",
    "unplanned": [],
    "runs": [
     "binder/run-87"
    ]
   },
-  "wave-50/batch-2": {
+  "legacy-wave-50/batch-2": {
    "v4": [
-    "wave-656/batch-1",
-    "wave-656/batch-2"
+    "wave-129/batch-1",
+    "wave-129/batch-2"
    ],
-   "v4_main": "wave-656/batch-1",
+   "v4_main": "wave-129/batch-1",
    "unplanned": [],
    "runs": [
     "binder/run-88"
    ]
   },
-  "wave-50/batch-3": {
+  "legacy-wave-50/batch-3": {
    "v4": [
-    "wave-656/batch-2",
-    "wave-691/batch-0"
+    "wave-129/batch-2",
+    "wave-164/batch-0"
    ],
-   "v4_main": "wave-656/batch-2",
+   "v4_main": "wave-129/batch-2",
    "unplanned": [],
    "runs": [
     "binder/run-89"
    ]
   },
-  "wave-50/batch-4": {
+  "legacy-wave-50/batch-4": {
    "v4": [
-    "wave-691/batch-0"
+    "wave-164/batch-0"
    ],
-   "v4_main": "wave-691/batch-0",
+   "v4_main": "wave-164/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-90"
    ]
   },
-  "wave-52/batch-0": {
+  "legacy-wave-52/batch-0": {
    "v4": [
-    "wave-656/batch-1",
-    "wave-656/batch-2",
-    "wave-664/batch-0",
-    "wave-691/batch-0"
+    "wave-129/batch-1",
+    "wave-129/batch-2",
+    "wave-137/batch-0",
+    "wave-164/batch-0"
    ],
-   "v4_main": "wave-664/batch-0",
+   "v4_main": "wave-137/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-91"
    ]
   },
-  "wave-52/batch-1": {
+  "legacy-wave-52/batch-1": {
    "v4": [],
    "v4_main": null,
    "unplanned": [
@@ -1023,115 +1023,115 @@
     "binder/run-92"
    ]
   },
-  "wave-172/batch-0": {
+  "legacy-wave-172/batch-0": {
    "v4": [
-    "wave-529/batch-1"
+    "wave-2/batch-1"
    ],
-   "v4_main": "wave-529/batch-1",
+   "v4_main": "wave-2/batch-1",
    "unplanned": [],
    "runs": [
     "binder/run-93"
    ]
   },
-  "wave-176/batch-0": {
+  "legacy-wave-176/batch-0": {
    "v4": [
-    "wave-556/batch-0",
-    "wave-556/batch-1"
+    "wave-29/batch-0",
+    "wave-29/batch-1"
    ],
-   "v4_main": "wave-556/batch-0",
+   "v4_main": "wave-29/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-94"
    ]
   },
-  "wave-176/batch-1": {
+  "legacy-wave-176/batch-1": {
    "v4": [
-    "wave-582/batch-0"
+    "wave-55/batch-0"
    ],
-   "v4_main": "wave-582/batch-0",
+   "v4_main": "wave-55/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-95"
    ]
   },
-  "wave-176/batch-2": {
+  "legacy-wave-176/batch-2": {
    "v4": [
-    "wave-556/batch-2",
-    "wave-567/batch-1",
-    "wave-567/batch-2"
+    "wave-29/batch-2",
+    "wave-40/batch-1",
+    "wave-40/batch-2"
    ],
-   "v4_main": "wave-567/batch-1",
+   "v4_main": "wave-40/batch-1",
    "unplanned": [],
    "runs": [
     "binder/run-96"
    ]
   },
-  "wave-178/batch-0": {
+  "legacy-wave-178/batch-0": {
    "v4": [
-    "wave-543/batch-0"
+    "wave-16/batch-0"
    ],
-   "v4_main": "wave-543/batch-0",
+   "v4_main": "wave-16/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-97"
    ]
   },
-  "wave-180/batch-0": {
+  "legacy-wave-180/batch-0": {
    "v4": [
-    "wave-567/batch-0"
+    "wave-40/batch-0"
    ],
-   "v4_main": "wave-567/batch-0",
+   "v4_main": "wave-40/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-98"
    ]
   },
-  "wave-228/batch-0": {
+  "legacy-wave-228/batch-0": {
    "v4": [
-    "wave-589/batch-0"
+    "wave-62/batch-0"
    ],
-   "v4_main": "wave-589/batch-0",
+   "v4_main": "wave-62/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-99"
    ]
   },
-  "wave-330/batch-0": {
+  "legacy-wave-330/batch-0": {
    "v4": [
-    "wave-652/batch-1"
+    "wave-125/batch-1"
    ],
-   "v4_main": "wave-652/batch-1",
+   "v4_main": "wave-125/batch-1",
    "unplanned": [],
    "runs": [
     "binder/run-100"
    ]
   },
-  "wave-330/batch-1": {
+  "legacy-wave-330/batch-1": {
    "v4": [
-    "wave-675/batch-0"
+    "wave-148/batch-0"
    ],
-   "v4_main": "wave-675/batch-0",
+   "v4_main": "wave-148/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-101"
    ]
   },
-  "wave-332/batch-0": {
+  "legacy-wave-332/batch-0": {
    "v4": [
-    "wave-675/batch-0",
-    "wave-688/batch-0"
+    "wave-148/batch-0",
+    "wave-161/batch-0"
    ],
-   "v4_main": "wave-675/batch-0",
+   "v4_main": "wave-148/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-102"
    ]
   },
-  "wave-334/batch-0": {
+  "legacy-wave-334/batch-0": {
    "v4": [
-    "wave-652/batch-0"
+    "wave-125/batch-0"
    ],
-   "v4_main": "wave-652/batch-0",
+   "v4_main": "wave-125/batch-0",
    "unplanned": [],
    "runs": [
     "binder/run-103"
@@ -1139,38 +1139,38 @@
   }
  },
  "waves": {
-  "wave-4": "wave-540",
-  "wave-5": "wave-548",
-  "wave-8": "wave-532",
-  "wave-9": "wave-544",
-  "wave-10": "wave-568",
-  "wave-14": "wave-531",
-  "wave-16": "wave-531",
-  "wave-18": "wave-536",
-  "wave-20": "wave-549",
-  "wave-22": "wave-579",
-  "wave-24": "wave-579",
-  "wave-26": "wave-631",
-  "wave-28": "wave-642",
-  "wave-30": "wave-655",
-  "wave-32": "wave-669",
-  "wave-34": "wave-588",
-  "wave-36": "wave-604",
-  "wave-38": "wave-604",
-  "wave-40": "wave-616",
-  "wave-46": "wave-616",
-  "wave-42": "wave-618",
-  "wave-44": "wave-617",
-  "wave-48": "wave-646",
-  "wave-50": "wave-656",
-  "wave-52": "wave-664",
-  "wave-172": "wave-529",
-  "wave-176": "wave-567",
-  "wave-180": "wave-567",
-  "wave-178": "wave-543",
-  "wave-228": "wave-589",
-  "wave-330": "wave-652",
-  "wave-334": "wave-652",
-  "wave-332": "wave-675"
+  "legacy-wave-4": "wave-13",
+  "legacy-wave-5": "wave-21",
+  "legacy-wave-8": "wave-5",
+  "legacy-wave-9": "wave-17",
+  "legacy-wave-10": "wave-41",
+  "legacy-wave-14": "wave-4",
+  "legacy-wave-16": "wave-4",
+  "legacy-wave-18": "wave-9",
+  "legacy-wave-20": "wave-22",
+  "legacy-wave-22": "wave-52",
+  "legacy-wave-24": "wave-52",
+  "legacy-wave-26": "wave-104",
+  "legacy-wave-28": "wave-115",
+  "legacy-wave-30": "wave-128",
+  "legacy-wave-32": "wave-142",
+  "legacy-wave-34": "wave-61",
+  "legacy-wave-36": "wave-77",
+  "legacy-wave-38": "wave-77",
+  "legacy-wave-40": "wave-89",
+  "legacy-wave-46": "wave-89",
+  "legacy-wave-42": "wave-91",
+  "legacy-wave-44": "wave-90",
+  "legacy-wave-48": "wave-119",
+  "legacy-wave-50": "wave-129",
+  "legacy-wave-52": "wave-137",
+  "legacy-wave-172": "wave-2",
+  "legacy-wave-176": "wave-40",
+  "legacy-wave-180": "wave-40",
+  "legacy-wave-178": "wave-16",
+  "legacy-wave-228": "wave-62",
+  "legacy-wave-330": "wave-125",
+  "legacy-wave-334": "wave-125",
+  "legacy-wave-332": "wave-148"
  }
 }

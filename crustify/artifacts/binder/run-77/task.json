@@ -16,12 +16,12 @@
       "home": "crustify/rust/libgit2/libgit2/diff/diff.rs"
     }
   ],
-  "wave": 553,
+  "wave": 26,
   "batch": 0,
   "link_unit": "libgit2",
   "module": "src/libgit2/diff.c",
   "foundational": false,
-  "base_branch": "crustify/waves/wave-553",
+  "base_branch": "crustify/waves/wave-26",
   "model": "openrouter/openai/gpt-6-astra",
   "billing": "api"
 }

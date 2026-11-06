@@ -37,12 +37,12 @@
       "home": "crustify/rust/libgit2/libgit2/index/pathspec.rs"
     }
   ],
-  "wave": 691,
+  "wave": 164,
   "batch": 0,
   "link_unit": "libgit2",
   "module": "src/libgit2/pathspec.c",
   "foundational": false,
-  "base_branch": "crustify/waves/wave-691",
+  "base_branch": "crustify/waves/wave-164",
   "model": "openrouter/anthropic/claude-opus-5.5",
   "billing": "api"
 }

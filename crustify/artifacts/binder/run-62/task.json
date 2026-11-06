@@ -44,12 +44,12 @@
       "home": "crustify/rust/libgit2/libgit2/object/commit.rs"
     }
   ],
-  "wave": 669,
+  "wave": 142,
   "batch": 0,
   "link_unit": "libgit2",
   "module": "src/libgit2/commit.c",
   "foundational": false,
-  "base_branch": "crustify/waves/wave-669",
+  "base_branch": "crustify/waves/wave-142",
   "model": "openrouter/anthropic/claude-opus-5.5",
   "billing": "api"
 }

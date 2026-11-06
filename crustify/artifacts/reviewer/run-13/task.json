@@ -2,7 +2,7 @@
   "commits": [
     "dac180222"
   ],
-  "wave": 15,
+  "wave": "legacy-15",
   "batch": 1,
   "link_unit": "libgit2",
   "module": null,

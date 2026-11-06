@@ -156,12 +156,12 @@
       "home": "src/libgit2/src/libgit2/odb.rs"
     }
   ],
-  "wave": 567,
+  "wave": 40,
   "batch": 1,
   "link_unit": "libgit2",
   "module": "src/libgit2/odb.c",
   "foundational": false,
-  "base_branch": "crustify/waves/wave-567",
+  "base_branch": "crustify/waves/wave-40",
   "model": "openrouter/anthropic/claude-opus-5.5",
   "billing": "api",
   "instructions": "instructions.md"

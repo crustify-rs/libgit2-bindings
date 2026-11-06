@@ -2,7 +2,7 @@
   "commits": [
     "50789cf60c87f8610eff8457ea7e16abb0879ca0"
   ],
-  "wave": 335,
+  "wave": "legacy-335",
   "batch": 0,
   "link_unit": "libgit2",
   "module": "src/libgit2/checkout.c",

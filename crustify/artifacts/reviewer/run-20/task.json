@@ -2,7 +2,7 @@
   "commits": [
     "b78596a8f"
   ],
-  "wave": 25,
+  "wave": "legacy-25",
   "batch": 0,
   "link_unit": "libgit2",
   "module": null,
